@@ -21,6 +21,16 @@ http {
         ''      close;
     }
 
+    # Sub-filter rewrites SvelteKit's absolute asset paths.
+    # Built SPA emits `<link href="/_app/immutable/...">` because adapter-static
+    # in fallback mode can't know the runtime URL prefix at build time, and
+    # SvelteKit's `paths.relative` only applies to `%sveltekit.assets%`-style
+    # template variables — NOT to module preload tags it emits itself. Without
+    # rewriting, the browser requests `/_app/...` from origin root (HA frontend),
+    # gets 404s for every chunk, and the SPA never boots.
+    sub_filter_once off;
+    sub_filter_types text/html application/javascript text/css;
+
     server {
         listen {{ env "INGRESS_PORT" }} default_server;
         server_name _;
@@ -30,7 +40,14 @@ http {
 
         # SPA fallback — any unknown path serves index.html so the
         # SvelteKit client-side router can take over.
+        # sub_filter rewrites `/_app/` to `<ingress_entry>/_app/` so the
+        # built absolute paths resolve correctly through the ingress proxy.
+        # INGRESS_ENTRY comes from bashio (no trailing slash), e.g.
+        # `/api/hassio_ingress/<token>`.
         location / {
+            sub_filter '"/_app/' '"{{ env "INGRESS_ENTRY" }}/_app/';
+            sub_filter "'/_app/" "'{{ env "INGRESS_ENTRY" }}/_app/";
+            sub_filter '"/favicon' '"{{ env "INGRESS_ENTRY" }}/favicon';
             try_files $uri $uri/ /index.html;
         }
 
