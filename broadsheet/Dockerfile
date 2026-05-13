@@ -9,8 +9,14 @@ FROM $BUILD_FROM
 RUN apk add --no-cache nginx py3-pip py3-aiohttp \
     && rm -rf /var/cache/apk/*
 
-# Copy the runtime files first (these change rarely)
-COPY run.sh /
+# Wire run.sh into the s6-overlay service-discovery layout. The
+# hass-base image's ENTRYPOINT is /init (s6-overlay's PID-1 init),
+# which scans /etc/services.d/<name>/run and supervises each found
+# script. If we instead set CMD ["/run.sh"] (the obvious-looking
+# pattern), our script becomes PID 1 directly, s6-overlay-suexec
+# refuses to operate ("can only run as pid 1"), and the addon dies
+# at start with that exact error in the logs.
+COPY run.sh /etc/services.d/broadsheet/run
 COPY nginx.conf.tpl /etc/nginx/nginx.conf.tpl
 COPY sidecar.py /usr/share/broadsheet/sidecar.py
 
@@ -20,11 +26,12 @@ COPY sidecar.py /usr/share/broadsheet/sidecar.py
 # In dev (manual local docker build) you can pre-populate www/ yourself.
 COPY www/ /usr/share/broadsheet/www/
 
-RUN chmod +x /run.sh
+RUN chmod +x /etc/services.d/broadsheet/run
 
 EXPOSE 8099
 
-CMD ["/run.sh"]
+# No CMD — hass-base's /init (s6-overlay) handles startup via
+# /etc/services.d/broadsheet/run.
 
 # Labels (used by HA's add-on builder + GHCR display)
 LABEL \
