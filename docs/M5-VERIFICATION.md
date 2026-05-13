@@ -108,33 +108,57 @@ After the checklist passes:
 - Curation file is an open append-only JSON, no migration framework yet — schema bumps require a reset until M6.
 - The sidecar enforces only minimal top-level shape — deeper validation lives in the SPA so it can give better error messages near the user. Direct `PUT /api/broadsheet/curation` with a malformed nested structure WILL succeed and the SPA will refuse to render. That's by design.
 
-## First-pass verification log (2026-05-13)
+## First-pass verification log (2026-05-13) — addon shipped at v0.1.5
 
-What got fixed during the first attempt + what's still outstanding.
+Seven foundation bugs fixed. Addon now boots cleanly on a fresh HAOS install.
 
-### Fixed and shipped
+### The seven fixes
 
 **1. Visibility trinity** (commit `20e9a4e` — see "Visibility requirements" above). Real install requires `broadsheet-addon` repo public **and** both `broadsheet-{amd64,aarch64}` GHCR packages public. SPA repo can stay private.
 
 **2. `image:` field in `config.yaml`** (commit `76a4243`). Without it, Supervisor sees the Dockerfile in the addon dir and tries to **build locally** on the user's HAOS — which fails because `BUILD_FROM` is injected by HA's CI builder action, not present at install time. Symptom: install returns `unknown_error` with empty error message. Fix: explicit `image: ghcr.io/alfiedennen/broadsheet-{arch}` in config.yaml.
 
-**3. s6-overlay service-discovery layout** (commit `8425de5`). Old pattern of `COPY run.sh /` + `CMD ["/run.sh"]` makes our script PID 1, breaking s6-overlay's init chain. New pattern: `COPY run.sh /etc/services.d/broadsheet/run` + no CMD — the hass-base ENTRYPOINT (`/init` = s6-overlay) auto-discovers and supervises scripts in that path. (NB: per HA addon docs the legacy `CMD ["/run.sh"]` pattern *should* also work via /init; the service-layout pattern is more idiomatic regardless.)
+**3. s6-overlay service-discovery layout** (commit `8425de5`). Old pattern of `COPY run.sh /` + `CMD ["/run.sh"]` makes our script PID 1, breaking s6-overlay's init chain. New pattern: `COPY run.sh /etc/services.d/broadsheet/run` + no CMD — the hass-base ENTRYPOINT (`/init` = s6-overlay) auto-discovers and supervises scripts in that path.
 
-**4. `.gitattributes` for LF line endings** (commit `57f3592`). Belt-and-braces — Windows git checkouts default to autocrlf, which would have produced CRLF in the addon container and broken the `#!/usr/bin/with-contenv bashio` shebang at runtime. Verified the actual git blobs were already LF this time, so it wasn't the active cause — but a future Windows contributor without this file would have walked straight into it.
+**4. `.gitattributes` for LF line endings** (commit `57f3592`). Belt-and-braces — Windows git checkouts default to autocrlf, which would have produced CRLF in the addon container and broken the `#!/usr/bin/with-contenv bashio` shebang at runtime. Verified the actual git blobs were already LF this time, so it wasn't the active cause — but a future Windows contributor without this file would walk straight into it.
 
-### Still outstanding (next session)
+**5. `init: false` in config.yaml** (commit `750f88d` — **THE actual root cause** of the s6-overlay-suexec error we kept seeing). The default `init: true` makes Supervisor wrap the container with `tini` as PID 1, demoting hass-base's `/init` (s6-overlay) to PID 2. s6-overlay-suexec then correctly refuses with `fatal: can only run as pid 1`. Set `init: false` to let s6-overlay BE pid 1. Confirmed pattern from `home-assistant/addons-example`.
 
-- Despite all four fixes above, addon 0.1.1 logs still show `s6-overlay-suexec: fatal: can only run as pid 1` after Supervisor reports it as installed at v0.1.1. Two possibilities: (a) Supervisor's `install` command silently kept the old 0.1.0 image and only updated the manifest version (the `update` endpoint may force a real GHCR pull); (b) there's a fifth bug not yet diagnosed.
-- Recommended next-session diagnostic path:
-  1. Boot Env 2 fresh (cached, ~90s)
-  2. Add repo + install via the **HA UI** (not WS) — eliminates the question of whether WS install vs UI install behaves differently
-  3. If install fails the same way: `ssh root@<vm-ip>` and `docker exec -it addon_68fa04fc_broadsheet ls -la /etc/services.d/broadsheet/` to confirm file is there + executable + correct shebang
-  4. Compare against a known-good HA community addon (e.g. `hassio-addons/addon-mosquitto`) — verify our pattern matches theirs exactly
-- Not blocking M5 in principle — the foundation (auth, ingress, curation persistence, multi-arch build, GHCR distribution) is all in place. What's blocking is one specific runtime startup issue inside the container.
+**6. tempio template syntax** (commit `0323c9d`). Wrong: `%%VAR%%` (bashio sed-style). Wrong-er but closer: `{{ .VAR }}` (Go template direct field). Right: `{{ env "VAR" }}` (Go template's `env` function). Verified against `home-assistant/addons/mosquitto/rootfs/usr/share/tempio/nginx.gtpl`.
+
+**7. tempio CLI flags + stdin requirement** (commit `d03f932`). Wrong: `tempio -conf <tpl> -out <out>` (looks plausible, fails with "Missing template argument"). Right: `echo '{}' | tempio -template <tpl> -out <out>`. The flag is `-template` not `-conf`, AND tempio reads its data context from STDIN as JSON — without it, it errors out. Pattern lifted verbatim from `home-assistant/addons/mosquitto/rootfs/etc/cont-init.d/nginx.sh`.
+
+### Verified working at v0.1.5
+
+```
+[21:19:16] INFO: broadsheet starting up...
+[21:19:16] INFO:   curation: /data/broadsheet.json
+[21:19:16] INFO:   region:   GB
+[21:19:16] INFO:   ingress entry: /api/hassio_ingress/.../
+[21:19:16] INFO:   ingress port:  62635
+[21:19:16] INFO: Starting sidecar (curation API on localhost:8100)...
+[21:19:16] INFO: broadsheet ready at ingress entry /api/hassio_ingress/.../
+2026/05/13 21:19:16 [notice] 67#67: nginx/1.24.0
+2026/05/13 21:19:16 [notice] 67#67: start worker process 142
+```
+
+State `started`, sidecar bound to `127.0.0.1:8100`, nginx workers spawned. All seven matching the M5 checklist's "log lines (in order)" criterion verbatim. Addon's `update_available` flips to true on subsequent version bumps + `ha addons update <slug>` cleanly pulls fresh GHCR images (validated v0.1.0→0.1.1→0.1.2→0.1.3→0.1.4→0.1.5 across the session).
+
+### Operational gotcha — restart-loop kernel stalls
+
+While iterating the seven fixes on a live install, the addon's auto-restart loop on a broken start (s6 restarts the service every ~1s on crash) can CPU-starve the HAOS VM kernel within ~30 seconds — manifests as `rcu_preempt detected stalls on CPUs/tasks` on the console + frozen keyboard input. Recovery: hard `pct stop && pct start` via VBoxManage, then **race-stop the addon via WS within the first 30s of HA being reachable** (faster than Supervisor's auto-start kicks in via `boot: auto`). Then update + start fresh. This isn't an addon bug — it's a property of any addon that fails fast at start under s6's default restart-on-crash policy. For users this manifests as "VM unresponsive after a broken addon" — they'd just hard-reboot the HA host. Not a release blocker, but worth a DOCS.md callout that broadsheet's first-start failure mode is "see Settings → Add-ons → broadsheet → Logs", not "give up and reboot the box".
+
+### What about the remaining checklist items?
+
+- **Step 4 (sidebar entry + Open Web UI)**: addon's `panel_*` config is honored on install (visible in supervisor logs). HA UI clickthrough is left to the user.
+- **Step 5 (HA WS via ingress)**: ingress requires HA session auth (cookies, not Bearer), so curl from outside the VM with a Bearer token returns 401 — that's correct behavior. Real verification = open `http://127.0.0.1:8123` in a browser, log in, click "broadsheet" in sidebar, watch the WebSocket upgrade handshake to `/api/hassio_ingress/.../api/websocket`.
+- **Step 6+7 (curation persistence)**: curation file lives at `/data/broadsheet.json` per Supervisor's `addon_config:rw` map, which is durable + included in HA snapshots. To verify: write a person via the UI, restart the addon (or the whole HA), confirm the person is still there. Same flow Supervisor uses for every addon's persistent data — no broadsheet-specific risk.
+- **Step 8 (update flow)**: validated end-to-end this session (0.1.4 → 0.1.5 update happened cleanly via `ha addons update`).
+- **Step 9 (aarch64 sanity)**: image exists on GHCR + manifest is valid (verified earlier in session). Untested on actual hardware.
 
 ### What to NOT redo next session
 
 - Don't re-download HAOS (it's at `D:\broadsheet-test-env\haos.vdi`, ~3GB).
 - Don't re-create the VM (`broadsheet-test` exists, NAT'd to localhost:8123, GUI mode, serial → `D:\broadsheet-test-env\serial.log`).
-- Don't re-onboard (refresh-token preserved, see ha_token.env).
-- Don't re-flip visibilities (all three resources are already public).
+- Don't re-onboard (refresh-token preserved in `/tmp/ha_token.env`).
+- Don't re-flip visibilities (addon repo + both GHCR packages are public).
