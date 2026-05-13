@@ -107,3 +107,34 @@ After the checklist passes:
 - broadsheet currently only authenticates the SPA's HA WS connection via the SUPERVISOR_TOKEN path. There's no LLAT mode for self-hosted users (M5+ scope).
 - Curation file is an open append-only JSON, no migration framework yet — schema bumps require a reset until M6.
 - The sidecar enforces only minimal top-level shape — deeper validation lives in the SPA so it can give better error messages near the user. Direct `PUT /api/broadsheet/curation` with a malformed nested structure WILL succeed and the SPA will refuse to render. That's by design.
+
+## First-pass verification log (2026-05-13)
+
+What got fixed during the first attempt + what's still outstanding.
+
+### Fixed and shipped
+
+**1. Visibility trinity** (commit `20e9a4e` — see "Visibility requirements" above). Real install requires `broadsheet-addon` repo public **and** both `broadsheet-{amd64,aarch64}` GHCR packages public. SPA repo can stay private.
+
+**2. `image:` field in `config.yaml`** (commit `76a4243`). Without it, Supervisor sees the Dockerfile in the addon dir and tries to **build locally** on the user's HAOS — which fails because `BUILD_FROM` is injected by HA's CI builder action, not present at install time. Symptom: install returns `unknown_error` with empty error message. Fix: explicit `image: ghcr.io/alfiedennen/broadsheet-{arch}` in config.yaml.
+
+**3. s6-overlay service-discovery layout** (commit `8425de5`). Old pattern of `COPY run.sh /` + `CMD ["/run.sh"]` makes our script PID 1, breaking s6-overlay's init chain. New pattern: `COPY run.sh /etc/services.d/broadsheet/run` + no CMD — the hass-base ENTRYPOINT (`/init` = s6-overlay) auto-discovers and supervises scripts in that path. (NB: per HA addon docs the legacy `CMD ["/run.sh"]` pattern *should* also work via /init; the service-layout pattern is more idiomatic regardless.)
+
+**4. `.gitattributes` for LF line endings** (commit `57f3592`). Belt-and-braces — Windows git checkouts default to autocrlf, which would have produced CRLF in the addon container and broken the `#!/usr/bin/with-contenv bashio` shebang at runtime. Verified the actual git blobs were already LF this time, so it wasn't the active cause — but a future Windows contributor without this file would have walked straight into it.
+
+### Still outstanding (next session)
+
+- Despite all four fixes above, addon 0.1.1 logs still show `s6-overlay-suexec: fatal: can only run as pid 1` after Supervisor reports it as installed at v0.1.1. Two possibilities: (a) Supervisor's `install` command silently kept the old 0.1.0 image and only updated the manifest version (the `update` endpoint may force a real GHCR pull); (b) there's a fifth bug not yet diagnosed.
+- Recommended next-session diagnostic path:
+  1. Boot Env 2 fresh (cached, ~90s)
+  2. Add repo + install via the **HA UI** (not WS) — eliminates the question of whether WS install vs UI install behaves differently
+  3. If install fails the same way: `ssh root@<vm-ip>` and `docker exec -it addon_68fa04fc_broadsheet ls -la /etc/services.d/broadsheet/` to confirm file is there + executable + correct shebang
+  4. Compare against a known-good HA community addon (e.g. `hassio-addons/addon-mosquitto`) — verify our pattern matches theirs exactly
+- Not blocking M5 in principle — the foundation (auth, ingress, curation persistence, multi-arch build, GHCR distribution) is all in place. What's blocking is one specific runtime startup issue inside the container.
+
+### What to NOT redo next session
+
+- Don't re-download HAOS (it's at `D:\broadsheet-test-env\haos.vdi`, ~3GB).
+- Don't re-create the VM (`broadsheet-test` exists, NAT'd to localhost:8123, GUI mode, serial → `D:\broadsheet-test-env\serial.log`).
+- Don't re-onboard (refresh-token preserved, see ha_token.env).
+- Don't re-flip visibilities (all three resources are already public).
