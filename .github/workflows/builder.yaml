@@ -34,12 +34,19 @@ jobs:
 
       # Sibling checkout for the SPA source. Pinned to main for now;
       # on tag releases pin to a matching SPA tag for reproducible builds.
+      # broadsheet is still private during dev. The default GITHUB_TOKEN
+      # of this repo can only see itself, so cross-repo checkout needs a
+      # fine-grained PAT stored as BROADSHEET_SOURCE_PAT (Contents: Read,
+      # scoped to alfiedennen/broadsheet only). Strip when broadsheet
+      # goes public — actions/checkout will fall back to the default
+      # GITHUB_TOKEN automatically.
       - name: Checkout broadsheet (SPA source)
         uses: actions/checkout@v4
         with:
           repository: alfiedennen/broadsheet
           path: .broadsheet-source
           ref: main
+          token: ${{ secrets.BROADSHEET_SOURCE_PAT }}
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
