@@ -1,6 +1,12 @@
 name: broadsheet
-version: "0.1.1"
+version: "0.1.2"
 slug: broadsheet
+# We use the hass-base image which already provides s6-overlay as /init.
+# The Supervisor default (`init: true`) would wrap our container with
+# `tini` as PID 1, demoting s6-overlay's /init to PID 2 — at which point
+# `s6-overlay-suexec` fails with "fatal: can only run as pid 1" and the
+# addon dies on every start. Set false to let s6-overlay BE pid 1.
+init: false
 description: >
   An editorial frontend for Home Assistant. Italic display serif, pages
   not screens, prose not specs. Adapts to whatever your HA install
