@@ -11,6 +11,13 @@ arch:
   - aarch64
   - amd64
 
+# Pre-built image on GHCR. Without this Supervisor falls back to
+# building the Dockerfile locally on the user's HAOS — which fails
+# because BUILD_FROM is empty (it's injected by HA's builder action,
+# not present at install time). The {arch} placeholder is Supervisor-
+# substituted at install time. Tag is implicit — matches `version:`.
+image: ghcr.io/alfiedennen/broadsheet-{arch}
+
 # Boot at HA boot, restart on crash
 startup: services
 boot: auto
