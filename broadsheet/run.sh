@@ -92,11 +92,17 @@ EOF
 
 # ── 5. Render nginx config from template ────────────────────────────
 # tempio is bundled in hass-base — substitutes env vars into the
-# template. We need to inject ingress_port (chosen by Supervisor) +
-# SUPERVISOR_TOKEN into the proxy config.
+# template via Go template syntax + the `env` function. Two CLI gotchas
+# to remember (each cost a debugging round in the M5 verification):
+#   - Flag is `-template`, not `-conf`. Wrong flag → tempio errors with
+#     `Missing template argument` and exits.
+#   - tempio reads its data context from STDIN as JSON. We don't have
+#     non-env data, so we pipe `{}` to satisfy the parser. Without it
+#     tempio also errors out.
+# Pattern lifted verbatim from home-assistant/addons/mosquitto.
 export INGRESS_PORT
 export SUPERVISOR_TOKEN
-tempio -conf /etc/nginx/nginx.conf.tpl -out /etc/nginx/nginx.conf
+echo "{}" | tempio -template /etc/nginx/nginx.conf.tpl -out /etc/nginx/nginx.conf
 
 # ── 6. Start sidecar (curation API on localhost) ────────────────────
 bashio::log.info "Starting sidecar (curation API on localhost:8100)..."
