@@ -10,7 +10,12 @@ events {
 http {
     include       /etc/nginx/mime.types;
     default_type  application/octet-stream;
-    sendfile      on;
+    # sendfile() bypasses nginx's user-space content filter chain — kernel
+    # copies file → socket directly. sub_filter (which we use to rewrite
+    # SvelteKit's absolute /_app/ asset paths) lives in that filter chain
+    # and cannot operate on sendfile responses. Performance hit is
+    # negligible for a small SPA bundle, so off across the board.
+    sendfile      off;
     keepalive_timeout 65;
     gzip on;
     gzip_types text/css application/javascript application/json image/svg+xml application/manifest+json;
