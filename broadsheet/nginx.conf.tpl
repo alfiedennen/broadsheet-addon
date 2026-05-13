@@ -22,7 +22,7 @@ http {
     }
 
     server {
-        listen {{ .INGRESS_PORT }} default_server;
+        listen {{ env "INGRESS_PORT" }} default_server;
         server_name _;
 
         root /usr/share/broadsheet/www;
@@ -48,7 +48,7 @@ http {
         # pastes one — it just talks to its own origin.
         location /api/ {
             proxy_pass http://supervisor/core/api/;
-            proxy_set_header Authorization "Bearer {{ .SUPERVISOR_TOKEN }}";
+            proxy_set_header Authorization "Bearer {{ env "SUPERVISOR_TOKEN" }}";
             proxy_http_version 1.1;
             proxy_set_header Upgrade $http_upgrade;
             proxy_set_header Connection $connection_upgrade;
@@ -62,7 +62,7 @@ http {
         # Core endpoint.
         location /local/ {
             proxy_pass http://supervisor/core/local/;
-            proxy_set_header Authorization "Bearer {{ .SUPERVISOR_TOKEN }}";
+            proxy_set_header Authorization "Bearer {{ env "SUPERVISOR_TOKEN" }}";
             proxy_set_header Host $host;
         }
     }
