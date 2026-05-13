@@ -1,0 +1,22 @@
+# Force LF line endings for shell scripts and Linux config templates so
+# Windows autocrlf doesn't break shebangs / nginx parsing inside the
+# addon container.
+#
+# Symptom when this is missing: addon dies at start with
+# "s6-overlay-suexec: fatal: can only run as pid 1" — caused not by s6
+# but by the shebang `#!/usr/bin/with-contenv bashio\r` (trailing CR)
+# pointing at a non-existent binary, which falls through to a different
+# error path inside s6.
+*.sh        text eol=lf
+*.tpl       text eol=lf
+run         text eol=lf
+*.py        text eol=lf
+*.yaml      text eol=lf
+*.yml       text eol=lf
+Dockerfile  text eol=lf
+
+# Binary assets — never normalise
+*.png       binary
+*.jpg       binary
+*.svg       binary
+*.ico       binary
