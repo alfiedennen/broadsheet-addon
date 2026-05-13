@@ -1,5 +1,5 @@
 name: broadsheet
-version: "0.1.5"
+version: "0.1.6"
 slug: broadsheet
 # We use the hass-base image which already provides s6-overlay as /init.
 # The Supervisor default (`init: true`) would wrap our container with
@@ -46,6 +46,13 @@ panel_title: broadsheet
 # to true since the panel exposes full HA Core API access (subject
 # to safety rails). Users can lower in their config if they want.
 panel_admin: true
+# Without this, the addon installs and is reachable via "Open Web UI"
+# on its addon page, but it does NOT appear in HA's sidebar by default.
+# (Supervisor defaults this to false even when panel_icon/panel_title
+# are set — verified during M5 verification on 2026-05-13.) For an
+# editorial frontend that's meant to be one click away, sidebar
+# placement is the whole point.
+ingress_panel: true
 
 # Map the add-on's persistent /data/ to the HA snapshot system.
 # `addon_config:rw` makes /data/broadsheet.json survive container
