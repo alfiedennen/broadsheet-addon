@@ -1,0 +1,88 @@
+name: Build broadsheet add-on
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+    branches:
+      - main
+  workflow_dispatch:
+
+# Only one concurrent build per ref
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - amd64
+          - aarch64
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      # Addon repo at workspace root so the HA builder action can find
+      # broadsheet/config.yaml at the conventional location.
+      - name: Checkout add-on repo
+        uses: actions/checkout@v4
+
+      # Sibling checkout for the SPA source. Pinned to main for now;
+      # on tag releases pin to a matching SPA tag for reproducible builds.
+      - name: Checkout broadsheet (SPA source)
+        uses: actions/checkout@v4
+        with:
+          repository: alfiedennen/broadsheet
+          path: .broadsheet-source
+          ref: main
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+          cache-dependency-path: .broadsheet-source/pnpm-lock.yaml
+
+      - name: Install SPA dependencies
+        working-directory: .broadsheet-source
+        run: pnpm install --frozen-lockfile
+
+      - name: Build SPA
+        working-directory: .broadsheet-source
+        run: pnpm --filter @broadsheet/core build
+
+      - name: Stage SPA build into addon www/
+        run: |
+          mkdir -p broadsheet/www
+          cp -r .broadsheet-source/packages/core/build/. broadsheet/www/
+          ls -la broadsheet/www/ | head -20
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # HA's official add-on builder. --target broadsheet means
+      # "build the addon at ./broadsheet/" relative to workspace.
+      # The image gets pushed to ghcr.io/<owner>/broadsheet-<arch>.
+      - name: Build add-on image
+        uses: home-assistant/builder@2024.08.2
+        with:
+          args: |
+            --${{ matrix.arch }} \
+            --target broadsheet \
+            --image "broadsheet-{arch}" \
+            --docker-hub "ghcr.io/${{ github.repository_owner }}" \
+            --addon

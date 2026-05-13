@@ -1,0 +1,18 @@
+# OS noise
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Build artifacts (bundled into the addon image at CI time, not tracked)
+broadsheet/www/
+
+# Local commit-message scratch
+.git-commit-msg.txt
+
+# IDE
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# Logs
+*.log

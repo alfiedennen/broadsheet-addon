@@ -1,0 +1,27 @@
+configuration:
+  log_level:
+    name: Log level
+    description: >
+      Verbosity of broadsheet's own logs (nginx + sidecar). `info` is
+      the default; `debug` adds curation-write tracing; `error` only
+      logs failures.
+  curation_path:
+    name: Curation file path
+    description: >
+      Where broadsheet.json lives inside the container. Defaults to
+      /data/broadsheet.json (persisted across restarts + included in
+      HA backups). Don't change unless you know what you're doing.
+  region:
+    name: Region (ISO 3166-1 alpha-2)
+    description: >
+      Two-letter country code (GB, US, DE, etc.). Used by the
+      @broadsheet/tmdb-tv plugin for streamer-provider filtering.
+  tmdb_api_key:
+    name: TMDB API key (optional)
+    description: >
+      Free key from themoviedb.org/settings/api. Required for the
+      @broadsheet/tmdb-tv plugin to surface "New" + "Trending" content
+      rows on /tv. Leave blank if you don't use the plugin.
+
+network:
+  8099/tcp: Web UI (only used directly outside ingress mode)

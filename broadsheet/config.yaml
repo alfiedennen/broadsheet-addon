@@ -1,0 +1,59 @@
+name: broadsheet
+version: "0.1.0"
+slug: broadsheet
+description: >
+  An editorial frontend for Home Assistant. Italic display serif, pages
+  not screens, prose not specs. Adapts to whatever your HA install
+  already has — areas, devices, entities, people — with no
+  lovelace.yaml required.
+url: https://github.com/alfiedennen/broadsheet
+arch:
+  - aarch64
+  - amd64
+
+# Boot at HA boot, restart on crash
+startup: services
+boot: auto
+
+# Web UI — what HA links from the add-on page (also wired into the
+# sidebar via panel_*)
+webui: http://[HOST]:[PORT:8099]
+ingress: true
+# ingress_port: 0 lets Supervisor allocate dynamically — avoids
+# collisions with other add-ons. Hard-coded ports are an anti-pattern.
+ingress_port: 0
+# WebSocket support through the ingress proxy. Without this, WS frames
+# buffer + you get mysterious lag.
+ingress_stream: true
+
+# Sidebar entry — show in HA's left nav, one click from anywhere
+panel_icon: mdi:home-heart
+panel_title: broadsheet
+# panel_admin: true means only HA admins can open the panel. Default
+# to true since the panel exposes full HA Core API access (subject
+# to safety rails). Users can lower in their config if they want.
+panel_admin: true
+
+# Map the add-on's persistent /data/ to the HA snapshot system.
+# `addon_config:rw` makes /data/broadsheet.json survive container
+# restarts AND be included in HA backups.
+map:
+  - addon_config:rw
+
+# Permissions
+hassio_api: true
+homeassistant_api: true
+hassio_role: default
+
+# Options shown in the add-on's Configuration tab
+options:
+  log_level: info
+  curation_path: /data/broadsheet.json
+  region: GB
+  tmdb_api_key: ""
+
+schema:
+  log_level: list(trace|debug|info|notice|warning|error|fatal)
+  curation_path: str
+  region: match(^[A-Z]{2}$)
+  tmdb_api_key: password?
