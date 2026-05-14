@@ -1,5 +1,5 @@
 name: broadsheet
-version: "0.1.11"
+version: "0.1.12"
 slug: broadsheet
 # We use the hass-base image which already provides s6-overlay as /init.
 # The Supervisor default (`init: true`) would wrap our container with
@@ -57,8 +57,15 @@ ingress_panel: true
 # Map the add-on's persistent /data/ to the HA snapshot system.
 # `addon_config:rw` makes /data/broadsheet.json survive container
 # restarts AND be included in HA backups.
+#
+# `homeassistant_config:rw` mounts the user's HA config dir at
+# /homeassistant. We use it ONLY to drop broadsheet.yaml into
+# /homeassistant/themes/ on first boot (never overwriting) — the v0.1
+# half of the replacement vision. The add-on touches nothing else in
+# the user's config; the theme is fully opt-in + reversible.
 map:
   - addon_config:rw
+  - homeassistant_config:rw
 
 # Permissions
 hassio_api: true

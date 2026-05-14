@@ -1,0 +1,155 @@
+# broadsheet — Home Assistant theme
+#
+# This restyles Home Assistant's OWN chrome (sidebar, header, config
+# pages, more-info dialogs) into broadsheet's editorial register, so
+# that dropping out of the broadsheet panel into HA's native UI isn't
+# a jarring context switch.
+#
+# It is the v0.1 half of the "replacement vision" — see
+# REPLACEMENT-VISION.md in the broadsheet repo. v0.1 makes HA's chrome
+# *consistent*; v0.2 makes it *unseen*.
+#
+# Token source: broadsheet SPA's own :root block
+# (packages/core/src/app.css). The HA chrome and the broadsheet panel
+# now read from the same palette.
+#
+# DELIVERY: the broadsheet add-on drops this file into
+# /config/themes/ on first boot — it never overwrites an existing
+# copy. It is entirely opt-in: nothing changes until you select it.
+#
+# TO ENABLE:  Settings → Profile → Theme → "broadsheet"
+# TO REVERT:  same place, pick any other theme. This file can then be
+#             deleted from /config/themes/ if you want it gone.
+#
+# FONTS: the editorial four-font register (Instrument Serif /
+# Newsreader / IBM Plex Sans / JetBrains Mono) needs the font files
+# loaded into HA's frontend. Without that step the theme still works —
+# it falls back to Iowan/Georgia/system-ui/Menlo, which keep the
+# serif-forward feel. To get the exact fonts, see DOCS.md §
+# "Optional: the full font register".
+
+broadsheet:
+  # ── surface ───────────────────────────────────────────────────────────
+  primary-background-color: "#1a1814"      # --bg
+  secondary-background-color: "#211e18"    # --bg-raised
+  card-background-color: "#211e18"
+  ha-card-background: "#211e18"
+  divider-color: "#2a261e"                 # --rule
+
+  # ── text ──────────────────────────────────────────────────────────────
+  primary-text-color: "#f4ede1"            # --fg
+  secondary-text-color: "#8a7f6f"          # --fg-muted
+  disabled-text-color: "#524a3f"           # --fg-dim
+  text-primary-color: "#f4ede1"
+
+  # ── accent (warm amber — the broadsheet signature) ────────────────────
+  primary-color: "#c08a4a"                 # --accent
+  accent-color: "#c08a4a"
+  dark-primary-color: "#a8763a"
+  light-primary-color: "#d4a05c"           # --accent-soft
+
+  # ── state colours (warm-tinted, from the SPA's semantic tokens) ───────
+  state-icon-active-color: "#c08a4a"
+  paper-item-icon-active-color: "#c08a4a"
+  paper-item-icon-color: "#8a7f6f"
+  state-icon-color: "#8a7f6f"
+  switch-checked-color: "#c08a4a"
+  switch-checked-button-color: "#c08a4a"
+  switch-checked-track-color: "#8a5e2e"
+  switch-unchecked-button-color: "#524a3f"
+  switch-unchecked-track-color: "#2a261e"
+  success-color: "#7aa37a"                 # --state-on (sage)
+  warning-color: "#c08a4a"                 # --state-warn (amber)
+  error-color: "#bf3a30"                   # --state-alert (rust)
+  info-color: "#a89978"                    # --state-info (gold)
+
+  # ── card chrome (crisp, editorial — no rounded pills, warm hairline) ──
+  ha-card-border-radius: "4px"
+  ha-card-border-color: "#2a261e"
+  ha-card-border-width: "1px"
+  ha-card-box-shadow: "none"
+
+  # ── layout gaps ───────────────────────────────────────────────────────
+  sections-column-gap: "8px"
+  sections-row-gap: "8px"
+  grid-card-gap: "8px"
+
+  # ── header ────────────────────────────────────────────────────────────
+  app-header-background-color: "#1a1814"
+  app-header-text-color: "#f4ede1"
+  app-header-edit-background-color: "#211e18"
+
+  # ── sidebar (the chrome the user sees most) ───────────────────────────
+  sidebar-background-color: "#1a1814"
+  sidebar-text-color: "#f4ede1"
+  sidebar-icon-color: "#8a7f6f"
+  sidebar-selected-background-color: "#211e18"
+  sidebar-selected-text-color: "#c08a4a"
+  sidebar-selected-icon-color: "#c08a4a"
+
+  # ── sliders + paper widgets ───────────────────────────────────────────
+  paper-slider-active-color: "#c08a4a"
+  paper-slider-knob-color: "#c08a4a"
+  paper-slider-knob-start-color: "#c08a4a"
+  paper-slider-pin-color: "#c08a4a"
+  paper-slider-secondary-color: "#8a5e2e"
+  paper-slider-container-color: "#2a261e"
+  paper-listbox-color: "#f4ede1"
+  paper-listbox-background-color: "#211e18"
+  paper-tabs-selection-bar-color: "#c08a4a"
+
+  # ── more-info dialogs / popups / config forms ─────────────────────────
+  ha-dialog-title-text-color: "#f4ede1"
+  mdc-dialog-content-ink-color: "#f4ede1"
+  mdc-text-field-fill-color: "#1a1814"
+  mdc-text-field-ink-color: "#f4ede1"
+  mdc-text-field-label-ink-color: "#8a7f6f"
+  mdc-select-fill-color: "#1a1814"
+  mdc-select-ink-color: "#f4ede1"
+
+  # ── label badges ──────────────────────────────────────────────────────
+  label-badge-text-color: "#f4ede1"
+  label-badge-background-color: "#211e18"
+  label-badge-red: "#bf3a30"
+  label-badge-green: "#7aa37a"
+  label-badge-blue: "#a89978"
+  label-badge-yellow: "#c08a4a"
+  label-badge-grey: "#524a3f"
+
+  # ── code / pre blocks ─────────────────────────────────────────────────
+  markdown-code-background-color: "#1a1814"
+
+  # ────────────────────────────────────────────────────────────────────
+  # TYPOGRAPHY — the editorial four-font register.
+  # Each stack falls back gracefully: if the Google Fonts aren't loaded
+  # into HA's frontend (see DOCS.md), the system fallbacks keep the
+  # serif-forward feel rather than dropping to HA's default sans.
+  # ────────────────────────────────────────────────────────────────────
+
+  # Body / UI default — Newsreader serif
+  primary-font-family: 'Newsreader, "Iowan Old Style", Georgia, serif'
+  paper-font-common-base_-_font-family: 'Newsreader, "Iowan Old Style", Georgia, serif'
+  paper-font-body1_-_font-family: 'Newsreader, "Iowan Old Style", Georgia, serif'
+  paper-font-body2_-_font-family: 'Newsreader, "Iowan Old Style", Georgia, serif'
+  paper-font-subhead_-_font-family: 'Newsreader, "Iowan Old Style", Georgia, serif'
+
+  # Display / headlines — Instrument Serif
+  paper-font-headline_-_font-family: 'Instrument Serif, "Times New Roman", serif'
+  paper-font-display1_-_font-family: 'Instrument Serif, "Times New Roman", serif'
+  paper-font-display2_-_font-family: 'Instrument Serif, "Times New Roman", serif'
+  paper-font-display3_-_font-family: 'Instrument Serif, "Times New Roman", serif'
+  paper-font-display4_-_font-family: 'Instrument Serif, "Times New Roman", serif'
+  paper-font-title_-_font-family: 'Instrument Serif, "Times New Roman", serif'
+
+  # Caption / labels / buttons — IBM Plex Sans
+  paper-font-caption_-_font-family: 'IBM Plex Sans, "Helvetica Neue", system-ui, sans-serif'
+  paper-font-button_-_font-family: 'IBM Plex Sans, "Helvetica Neue", system-ui, sans-serif'
+  paper-font-menu_-_font-family: 'IBM Plex Sans, "Helvetica Neue", system-ui, sans-serif'
+  mdc-typography-button-font-family: 'IBM Plex Sans, "Helvetica Neue", system-ui, sans-serif'
+  mdc-typography-overline-font-family: 'IBM Plex Sans, "Helvetica Neue", system-ui, sans-serif'
+
+  # Code / mono — JetBrains Mono
+  paper-font-common-code_-_font-family: 'JetBrains Mono, ui-monospace, "SFMono-Regular", Menlo, monospace'
+  code-font-family: 'JetBrains Mono, ui-monospace, "SFMono-Regular", Menlo, monospace'
+  paper-font-code1_-_font-family: 'JetBrains Mono, ui-monospace, "SFMono-Regular", Menlo, monospace'
+  paper-font-code2_-_font-family: 'JetBrains Mono, ui-monospace, "SFMono-Regular", Menlo, monospace'

@@ -20,6 +20,10 @@ COPY run.sh /etc/services.d/broadsheet/run
 COPY nginx.conf.tpl /etc/nginx/nginx.conf.tpl
 COPY sidecar.py /usr/share/broadsheet/sidecar.py
 
+# The broadsheet HA theme — run.sh drops this into the user's
+# /homeassistant/themes/ on first boot (never overwriting).
+COPY theme/ /usr/share/broadsheet/theme/
+
 # Copy the prebuilt SPA bundle (rebuilt every CI run, hence last)
 # `www/` is populated by GitHub Actions before the docker build —
 # the broadsheet/core repo is checked out, pnpm build, copied here.

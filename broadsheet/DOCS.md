@@ -43,6 +43,43 @@ Eight pages that adapt to whatever your HA install already has:
 
 Most users won't need to change any of these.
 
+## The broadsheet look, applied to Home Assistant itself
+
+On first start, broadsheet drops a Home Assistant **theme** into your
+`/config/themes/` directory — `broadsheet.yaml`. It restyles HA's own
+chrome (sidebar, header, the config pages broadsheet doesn't replace)
+into the same warm editorial register as the broadsheet panel itself.
+
+The point: when you step out of broadsheet into HA's native
+automation editor or integrations page, it shouldn't feel like a
+context switch.
+
+**It is entirely opt-in.** Installing the add-on changes nothing
+about how HA looks. To turn it on:
+
+> **Settings → (your profile, bottom-left) → Theme → broadsheet**
+
+To revert: same place, pick any other theme. You can then delete
+`/config/themes/broadsheet.yaml` if you want it gone. broadsheet never
+overwrites that file once it exists — edit it freely.
+
+### Optional: the full font register
+
+The theme falls back to system serifs (Iowan / Georgia) out of the
+box, which keeps the serif-forward feel. For the exact four-font
+editorial register — Instrument Serif, Newsreader, IBM Plex Sans,
+JetBrains Mono — add this to your `configuration.yaml`:
+
+```yaml
+frontend:
+  extra_module_url:
+    - /local/broadsheet-fonts.js
+```
+
+…and copy `broadsheet-fonts.js` (shipped alongside the theme, in the
+add-on's `/usr/share/broadsheet/theme/`) into your `/config/www/`
+folder. This step is optional and the theme works well without it.
+
 ## How curation persists
 
 Your renames, hides, voice overrides, and per-person presence sensor

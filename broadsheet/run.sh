@@ -114,6 +114,41 @@ export INGRESS_ENTRY
 export SUPERVISOR_TOKEN
 echo "{}" | tempio -template /etc/nginx/nginx.conf.tpl -out /etc/nginx/nginx.conf
 
+# ── 5b. Offer the broadsheet HA theme (first boot only) ─────────────
+# The v0.1 half of the "replacement vision" — restyle HA's own chrome
+# to broadsheet's editorial register so dropping into HA's native
+# config pages isn't a jarring context switch. Strictly opt-in:
+#   - We drop the file into /homeassistant/themes/ ONCE. We never
+#     overwrite a file the user already has there.
+#   - Nothing changes until the user picks it in their HA profile.
+#   - Fully reversible — switch theme back, delete the file.
+# /homeassistant is the mount from `homeassistant_config:rw` in
+# config.yaml.
+HA_THEMES_DIR="/homeassistant/themes"
+THEME_SRC="/usr/share/broadsheet/theme/broadsheet.yaml"
+THEME_DST="${HA_THEMES_DIR}/broadsheet.yaml"
+if [ -f "${THEME_SRC}" ] && mkdir -p "${HA_THEMES_DIR}" 2>/dev/null; then
+    if [ ! -f "${THEME_DST}" ]; then
+        cp "${THEME_SRC}" "${THEME_DST}"
+        bashio::log.info "Installed broadsheet HA theme → ${THEME_DST}"
+        # Reload HA's themes so it's selectable without an HA restart.
+        # homeassistant_api: true grants us the supervisor → core proxy.
+        if curl -fsS -m 10 -X POST \
+            -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" \
+            -H "Content-Type: application/json" \
+            "http://supervisor/core/api/services/frontend/reload_themes" \
+            -d '{}' >/dev/null 2>&1; then
+            bashio::log.info "  Themes reloaded — enable via Settings → Profile → Theme → broadsheet"
+        else
+            bashio::log.notice "  Theme installed; reload didn't fire — it'll appear after the next HA restart"
+        fi
+    else
+        bashio::log.info "broadsheet HA theme already present at ${THEME_DST} — leaving it untouched"
+    fi
+else
+    bashio::log.notice "Couldn't reach ${HA_THEMES_DIR} — skipping theme install (is homeassistant_config mapped?)"
+fi
+
 # ── 6. Start sidecar (curation API on localhost) ────────────────────
 bashio::log.info "Starting sidecar (curation API on localhost:8100)..."
 python3 /usr/share/broadsheet/sidecar.py \
