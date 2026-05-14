@@ -1,5 +1,11 @@
 # broadsheet — Home Assistant theme
 #
+# broadsheet-theme-version: 0.1.13
+# ^ Machine-readable marker. The add-on updates this file on boot ONLY
+#   while this line is present — that's how it knows broadsheet owns
+#   the file and you haven't made it your own. Delete this single line
+#   and broadsheet will never touch the file again; it's yours to edit.
+#
 # This restyles Home Assistant's OWN chrome (sidebar, header, config
 # pages, more-info dialogs) into broadsheet's editorial register, so
 # that dropping out of the broadsheet panel into HA's native UI isn't
@@ -98,14 +104,34 @@ broadsheet:
   paper-listbox-background-color: "#211e18"
   paper-tabs-selection-bar-color: "#c08a4a"
 
-  # ── more-info dialogs / popups / config forms ─────────────────────────
+  # ── more-info dialogs / popups ────────────────────────────────────────
   ha-dialog-title-text-color: "#f4ede1"
   mdc-dialog-content-ink-color: "#f4ede1"
-  mdc-text-field-fill-color: "#1a1814"
-  mdc-text-field-ink-color: "#f4ede1"
-  mdc-text-field-label-ink-color: "#8a7f6f"
-  mdc-select-fill-color: "#1a1814"
-  mdc-select-ink-color: "#f4ede1"
+
+  # ── form inputs: text fields, selects, date pickers ───────────────────
+  # HA's whole input system cascades from the `--input-*` family (see
+  # frontend/src/resources/theme/color/color.globals.ts). The defaults
+  # are hardcoded LIGHT — `--input-fill-color: rgb(245,245,245)`,
+  # `--input-ink-color: rgba(0,0,0,0.87)` — so on a dark theme you get
+  # white dropdown boxes with near-invisible black text unless you
+  # override the source tokens. Every `--mdc-text-field-*` and
+  # `--mdc-select-*` var derives from these, as does `ha-date-input`,
+  # so setting the 12 source tokens fixes text fields, selects, AND
+  # the date picker in one place. (Don't bother setting the `mdc-*`
+  # tokens individually — HA can rename those between releases; the
+  # `--input-*` family is the stable root.)
+  input-fill-color: "#211e18"               # field surface (--bg-raised)
+  input-disabled-fill-color: "#1a1814"
+  input-ink-color: "#f4ede1"                # typed text (--fg)
+  input-label-ink-color: "#8a7f6f"          # field label (--fg-muted)
+  input-disabled-ink-color: "#524a3f"       # (--fg-dim)
+  input-idle-line-color: "#3a342a"          # underline, resting (--rule-strong)
+  input-hover-line-color: "#c08a4a"         # underline, hover (--accent)
+  input-disabled-line-color: "#211e18"
+  input-outlined-idle-border-color: "#3a342a"
+  input-outlined-hover-border-color: "#c08a4a"
+  input-outlined-disabled-border-color: "#211e18"
+  input-dropdown-icon-color: "#8a7f6f"      # the ▾ chevron (--fg-muted)
 
   # ── label badges ──────────────────────────────────────────────────────
   label-badge-text-color: "#f4ede1"

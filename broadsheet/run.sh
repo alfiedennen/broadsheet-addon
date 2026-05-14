@@ -114,36 +114,63 @@ export INGRESS_ENTRY
 export SUPERVISOR_TOKEN
 echo "{}" | tempio -template /etc/nginx/nginx.conf.tpl -out /etc/nginx/nginx.conf
 
-# ── 5b. Offer the broadsheet HA theme (first boot only) ─────────────
+# ── 5b. Offer / update the broadsheet HA theme ──────────────────────
 # The v0.1 half of the "replacement vision" — restyle HA's own chrome
 # to broadsheet's editorial register so dropping into HA's native
 # config pages isn't a jarring context switch. Strictly opt-in:
-#   - We drop the file into /homeassistant/themes/ ONCE. We never
-#     overwrite a file the user already has there.
 #   - Nothing changes until the user picks it in their HA profile.
 #   - Fully reversible — switch theme back, delete the file.
-# /homeassistant is the mount from `homeassistant_config:rw` in
-# config.yaml.
+#
+# Update policy (so theme FIXES actually reach users, without ever
+# clobbering a user's own edits):
+#   - File absent              → first-boot install.
+#   - File present, OUR marker → broadsheet owns it. Update only if
+#                                the shipped version differs.
+#   - File present, NO marker  → the user has made it their own
+#                                (or stripped the marker on purpose).
+#                                Never touch it.
+# The marker is the `# broadsheet-theme-version: X.Y.Z` line in the
+# theme file. /homeassistant is the `homeassistant_config:rw` mount.
 HA_THEMES_DIR="/homeassistant/themes"
 THEME_SRC="/usr/share/broadsheet/theme/broadsheet.yaml"
 THEME_DST="${HA_THEMES_DIR}/broadsheet.yaml"
-if [ -f "${THEME_SRC}" ] && mkdir -p "${HA_THEMES_DIR}" 2>/dev/null; then
-    if [ ! -f "${THEME_DST}" ]; then
-        cp "${THEME_SRC}" "${THEME_DST}"
-        bashio::log.info "Installed broadsheet HA theme → ${THEME_DST}"
-        # Reload HA's themes so it's selectable without an HA restart.
-        # homeassistant_api: true grants us the supervisor → core proxy.
-        if curl -fsS -m 10 -X POST \
-            -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" \
-            -H "Content-Type: application/json" \
-            "http://supervisor/core/api/services/frontend/reload_themes" \
-            -d '{}' >/dev/null 2>&1; then
-            bashio::log.info "  Themes reloaded — enable via Settings → Profile → Theme → broadsheet"
-        else
-            bashio::log.notice "  Theme installed; reload didn't fire — it'll appear after the next HA restart"
-        fi
+THEME_MARKER="broadsheet-theme-version:"
+
+theme_version_of() {
+    # Echo the version after the marker in $1, or empty if no marker.
+    grep -oE "${THEME_MARKER} *[0-9.]+" "$1" 2>/dev/null | head -1 \
+        | sed -E "s/.*${THEME_MARKER} *//"
+}
+
+install_theme() {
+    cp "${THEME_SRC}" "${THEME_DST}"
+    bashio::log.info "  ${1} broadsheet HA theme → ${THEME_DST}"
+    # Reload HA's themes so the change lands without an HA restart.
+    # homeassistant_api: true grants us the supervisor → core proxy.
+    if curl -fsS -m 10 -X POST \
+        -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" \
+        -H "Content-Type: application/json" \
+        "http://supervisor/core/api/services/frontend/reload_themes" \
+        -d '{}' >/dev/null 2>&1; then
+        bashio::log.info "  Themes reloaded — Settings → Profile → Theme → broadsheet"
     else
-        bashio::log.info "broadsheet HA theme already present at ${THEME_DST} — leaving it untouched"
+        bashio::log.notice "  Theme written; reload didn't fire — appears after next HA restart"
+    fi
+}
+
+if [ -f "${THEME_SRC}" ] && mkdir -p "${HA_THEMES_DIR}" 2>/dev/null; then
+    SHIPPED_VER="$(theme_version_of "${THEME_SRC}")"
+    if [ ! -f "${THEME_DST}" ]; then
+        install_theme "Installed"
+    else
+        INSTALLED_VER="$(theme_version_of "${THEME_DST}")"
+        if [ -z "${INSTALLED_VER}" ]; then
+            bashio::log.info "broadsheet HA theme at ${THEME_DST} has no version marker — user-owned, leaving untouched"
+        elif [ "${INSTALLED_VER}" != "${SHIPPED_VER}" ]; then
+            install_theme "Updated (${INSTALLED_VER} → ${SHIPPED_VER})"
+        else
+            bashio::log.info "broadsheet HA theme up to date (${INSTALLED_VER})"
+        fi
     fi
 else
     bashio::log.notice "Couldn't reach ${HA_THEMES_DIR} — skipping theme install (is homeassistant_config mapped?)"

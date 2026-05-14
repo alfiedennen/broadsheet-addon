@@ -60,8 +60,14 @@ about how HA looks. To turn it on:
 > **Settings → (your profile, bottom-left) → Theme → broadsheet**
 
 To revert: same place, pick any other theme. You can then delete
-`/config/themes/broadsheet.yaml` if you want it gone. broadsheet never
-overwrites that file once it exists — edit it freely.
+`/config/themes/broadsheet.yaml` if you want it gone.
+
+**Theme updates + your own edits.** The theme file carries a
+`# broadsheet-theme-version:` marker line. While that line is present,
+broadsheet treats the file as its own and will refresh it on add-on
+updates (so theme *fixes* reach you). The moment you want to make the
+theme yours — delete that one marker line. broadsheet then never
+touches the file again; it's entirely yours to edit.
 
 ### Optional: the full font register
 
