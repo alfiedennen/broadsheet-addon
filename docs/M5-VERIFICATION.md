@@ -193,11 +193,28 @@ SPA renders clean inside a fresh HA OS install, served through Ingress, **zero c
 
 For #1 and #2, nginx `sub_filter` is the right tool — but it needs `sendfile off` AND every substitution var actually `export`ed for tempio. For #3, the app code itself has to be ingress-aware. A future cleaner option worth evaluating: building the SPA with a `<base href>` set at runtime, or SvelteKit's `paths.base` fed a sentinel that nginx rewrites — but the sub_filter approach is shipped and works.
 
-### Remaining (user-driven, not blocking)
+### M5 fully verified (2026-05-14, at v0.1.15)
 
-- Add a `light.test_light` via HA Developer Tools → States, confirm it surfaces in broadsheet's `/settings/house`.
-- Curation persistence: add a person, restart the addon, confirm it survives (validates `addon_config:rw`).
-- aarch64 on real hardware.
+Final close-out — every architectural claim exercised against the Env 2 HA OS VM:
+
+| Check | Verified by |
+|---|---|
+| Addon installs, runs, survives restart | hard-gated `version`/`state` over WS |
+| SPA renders, zero console errors | browser |
+| Navigation (client-side, no full-page 404s) | `base`-prefix fix confirmed in shipped bundle + browser |
+| Theme applies to HA chrome | `frontend/get_themes` token assertions + browser |
+| WS connection SPA → supervisor proxy → HA Core | `frontend/get_themes` rides broadsheet's exact WS path; SPA boots past discovery |
+| Curation API reachable | SPA renders past `bootCuration` |
+| **Discovery against real HA data** | populated HA with 5 area-assigned registry entities (WS-only); broadsheet's `/settings/house` showed all 3 areas with correct counts, domain badges, live state, last-changed, + Unsorted bucketing the 8 area-less system entities — Layer 1 → 2 → 3 all live |
+| **Curation persistence** | renamed an entity in the SPA → restarted the addon (container killed + recreated) → rename survived. SPA → sidecar `:8100` → `/data/broadsheet.json` → `addon_config:rw` chain holds |
+| Version-marker theme updates | 0.1.13 theme file auto-updated to 0.1.15 on addon update, verified via `get_themes` |
+
+**M5 is closed.** broadsheet installs as an HA add-on, renders its SPA through Ingress, discovers a real HA, and persists curation across restarts.
+
+### Genuinely still deferred (not blocking)
+
+- **aarch64 on real hardware** — image builds + is pullable from GHCR; untested on an actual Pi.
+- **White hover states** — see "Known issues" below.
 
 ### Known issues — broadsheet HA theme (v0.1.15)
 
