@@ -86,7 +86,11 @@ window.__BROADSHEET_ENV__ = {
   supervisorToken: "${SUPERVISOR_TOKEN}",
   region: "${REGION}",
   tmdbKey: $([ -n "${TMDB_KEY}" ] && echo "\"${TMDB_KEY}\"" || echo "null"),
-  curationEndpoint: "/api/broadsheet/curation"
+  // Ingress-prefixed so the SPA's curation client hits THIS nginx's
+  // /api/broadsheet/ location block (HA's ingress proxy strips the
+  // prefix before the request reaches us). A bare /api/broadsheet/...
+  // would resolve against origin root and 404 on HA's frontend.
+  curationEndpoint: "${INGRESS_ENTRY}/api/broadsheet/curation"
 };
 EOF
 

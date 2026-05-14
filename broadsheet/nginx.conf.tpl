@@ -53,6 +53,12 @@ http {
             sub_filter '"/_app/' '"{{ env "INGRESS_ENTRY" }}/_app/';
             sub_filter "'/_app/" "'{{ env "INGRESS_ENTRY" }}/_app/";
             sub_filter '"/favicon' '"{{ env "INGRESS_ENTRY" }}/favicon';
+            # SvelteKit bakes `base: ""` into the inline bootstrap script
+            # because adapter-static + fallback mode can't know the serve
+            # URL at build time. Its entire runtime (version polling,
+            # route-data fetches) builds URLs from this base. Rewrite it
+            # to the ingress entry so those runtime fetches land on us.
+            sub_filter 'base: ""' 'base: "{{ env "INGRESS_ENTRY" }}"';
             try_files $uri $uri/ /index.html;
         }
 
