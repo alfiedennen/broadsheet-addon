@@ -100,7 +100,13 @@ EOF
 #     non-env data, so we pipe `{}` to satisfy the parser. Without it
 #     tempio also errors out.
 # Pattern lifted verbatim from home-assistant/addons/mosquitto.
+# All three vars MUST be exported — tempio's `{{ env "X" }}` reads the
+# process environment, not shell-local variables. INGRESS_ENTRY was the
+# one that bit us: left unexported, tempio rendered it as empty string,
+# making the nginx sub_filter rewrite (`"/_app/` → `"<entry>/_app/`) a
+# silent no-op, and the SPA kept 404ing on every asset.
 export INGRESS_PORT
+export INGRESS_ENTRY
 export SUPERVISOR_TOKEN
 echo "{}" | tempio -template /etc/nginx/nginx.conf.tpl -out /etc/nginx/nginx.conf
 
