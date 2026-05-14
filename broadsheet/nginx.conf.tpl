@@ -78,6 +78,19 @@ http {
             try_files $uri =404;
         }
 
+        # Plugin static assets. Each bundled plugin's `static/` dir is
+        # staged into the image at www/plugin-assets/<plugin-id>/ by
+        # CI; plugin code references them via pluginAssetUrl(), which
+        # resolves to /plugin-assets/<id>/… (ingress-prefixed at
+        # runtime). A dedicated namespace — NOT /local/<id>/ — because
+        # `location /local/` below already proxies to HA Core's own
+        # www folder; plugin assets would collide. Missing files 404
+        # cleanly (same reasoning as /_app/ — never the SPA fallback).
+        location /plugin-assets/ {
+            try_files $uri =404;
+            add_header Cache-Control "public, max-age=300";
+        }
+
         location / {
             sub_filter '"/_app/' '"{{ env "INGRESS_ENTRY" }}/_app/';
             sub_filter "'/_app/" "'{{ env "INGRESS_ENTRY" }}/_app/";

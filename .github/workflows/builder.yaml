@@ -74,6 +74,22 @@ jobs:
           cp -r .broadsheet-source/packages/core/build/. broadsheet/www/
           ls -la broadsheet/www/ | head -20
 
+      # Stage each bundled plugin's static/ dir into
+      # www/plugin-assets/<plugin-id>/. nginx serves these at
+      # /plugin-assets/<id>/*; plugin code resolves them via
+      # pluginAssetUrl(). The plugin package DIR name is the plugin id
+      # for the first-class trio. Plugins with no static/ are skipped.
+      - name: Stage plugin static assets into addon www/plugin-assets/
+        run: |
+          for d in .broadsheet-source/packages/*/static; do
+            [ -d "$d" ] || continue
+            plugin=$(basename "$(dirname "$d")")
+            mkdir -p "broadsheet/www/plugin-assets/$plugin"
+            cp -r "$d/." "broadsheet/www/plugin-assets/$plugin/"
+            echo "staged plugin assets: $plugin"
+          done
+          ls -R broadsheet/www/plugin-assets/ 2>/dev/null || echo "(no plugin assets staged)"
+
       - name: Login to GHCR
         uses: docker/login-action@v3
         with:
