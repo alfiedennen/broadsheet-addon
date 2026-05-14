@@ -63,6 +63,21 @@ http {
             add_header Cache-Control "no-store";
         }
 
+        # Built immutable assets — a missing file must return a REAL
+        # 404, never the index.html SPA fallback. When the add-on
+        # updates under an open tab, that tab's SvelteKit runtime asks
+        # for OLD chunk hashes; if `try_files` fed it index.html (200,
+        # text/html) the browser chokes with "expected a JS module, got
+        # text/html" and the app wedges. A clean 404 instead lets
+        # SvelteKit detect the version skew and reload itself. The
+        # sub_filter stays — chunks can carry cross-references to other
+        # `/_app/` paths that still need the ingress prefix.
+        location /_app/ {
+            sub_filter '"/_app/' '"{{ env "INGRESS_ENTRY" }}/_app/';
+            sub_filter "'/_app/" "'{{ env "INGRESS_ENTRY" }}/_app/";
+            try_files $uri =404;
+        }
+
         location / {
             sub_filter '"/_app/' '"{{ env "INGRESS_ENTRY" }}/_app/';
             sub_filter "'/_app/" "'{{ env "INGRESS_ENTRY" }}/_app/";
