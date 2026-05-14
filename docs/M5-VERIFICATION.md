@@ -162,3 +162,39 @@ While iterating the seven fixes on a live install, the addon's auto-restart loop
 - Don't re-create the VM (`broadsheet-test` exists, NAT'd to localhost:8123, GUI mode, serial → `D:\broadsheet-test-env\serial.log`).
 - Don't re-onboard (refresh-token preserved in `/tmp/ha_token.env`).
 - Don't re-flip visibilities (addon repo + both GHCR packages are public).
+
+## Second-pass: actually rendering the SPA (2026-05-14) — shipped at v0.1.11
+
+The first pass got the *container* running. It did not prove the **SPA renders** — clicking the panel was a white screen + a wall of asset 404s. Six more fixes (8–13) to get from "container starts" to "SPA renders clean in the browser, zero console errors".
+
+**8. `ingress_panel: true` in config.yaml** (`32240d3`). Even with `panel_icon` + `panel_title` + `panel_admin` all set, Supervisor defaults `ingress_panel` to false — the addon installs and is reachable via "Open Web UI" on its addon page, but gets NO sidebar entry. For a "one click from anywhere" frontend, the sidebar entry is the point.
+
+**9. nginx `sub_filter` to rewrite SvelteKit's absolute asset paths** (`2d7406f`). The built SPA emits `<link href="/_app/immutable/...">` — absolute from origin root. `adapter-static` in `fallback` mode can't know the runtime URL prefix at build time, and SvelteKit's `paths.relative` only affects `%sveltekit.assets%`-style template vars, NOT the modulepreload tags it emits. Browser requests `/_app/...` from origin root → hits HA's frontend → 404 on every chunk → SPA never boots. Fix: `sub_filter '"/_app/' '"<ingress_entry>/_app/'` (+ `'/favicon`) on HTML/JS/CSS responses.
+
+**10. `sendfile off`** (`4e950c0`). `sendfile()` copies file→socket in the kernel, bypassing nginx's user-space content-filter chain — where `sub_filter` lives. With `sendfile on` (the default) the rewrites in #9 silently never run.
+
+**11. `export INGRESS_ENTRY` in run.sh** (`2f05792`). tempio's `{{ env "INGRESS_ENTRY" }}` reads the *process environment*, not shell-local vars. run.sh set `INGRESS_ENTRY` but only exported `INGRESS_PORT` + `SUPERVISOR_TOKEN`, so tempio rendered it empty and the #9 sub_filter became `'"/_app/' → '"/_app/'` — a literal no-op. This was the missing half of #9.
+
+**12. nginx `sub_filter` for SvelteKit's runtime `base` + ingress-prefixed curation endpoint** (`f5c07ec`). With assets loading, the SPA *boots* — but SvelteKit bakes `base: ""` into the inline bootstrap script (fallback mode, again). Its whole runtime — `version.json` polling, route-data fetches — builds URLs from that empty base. Fix: `sub_filter 'base: ""' 'base: "<ingress_entry>"'`. Also: run.sh now writes `curationEndpoint` into `runtime-env.js` already ingress-prefixed.
+
+**13. `SidecarBackend` uses the prefixed curation endpoint** (broadsheet core `4637dbe`, shipped via addon `2dd0d3f`). The **only SPA-repo code change** in the whole M5 effort — everything else was addon packaging. `src/lib/curation/persistence.ts` hardcoded `fetch('/api/broadsheet/curation')`, ignoring the `curationEndpoint` env var. That bare path resolved against origin root (HA frontend, 404). Now reads `window.__BROADSHEET_ENV__.curationEndpoint`, falls back to the bare path for non-addon environments.
+
+### Verified at v0.1.11
+
+SPA renders clean inside a fresh HA OS install, served through Ingress, **zero console errors**. Sidebar panel present, assets load, SvelteKit runtime healthy, curation API reachable, HA WebSocket connects (no WS error = the `createLongLivedTokenAuth` → nginx `/api/` bearer-proxy → `supervisor/core/api/websocket` path works).
+
+### The generalisable lesson — SvelteKit + adapter-static under HA Ingress
+
+`adapter-static` with `fallback: 'index.html'` produces a build that assumes it's served from origin root. Under HA Ingress (dynamic per-install `/api/hassio_ingress/<token>/` prefix) that assumption breaks in three places, none fixable at build time because the prefix isn't known until install:
+
+1. **Static asset refs** in index.html (`/_app/...`) — nginx `sub_filter`.
+2. **SvelteKit's runtime `base`** baked as `""` in the bootstrap script — nginx `sub_filter` on `base: ""`.
+3. **App's own API calls** — must read the ingress prefix from a runtime-injected env (`window.__BROADSHEET_ENV__`) rather than hardcoding origin-relative paths.
+
+For #1 and #2, nginx `sub_filter` is the right tool — but it needs `sendfile off` AND every substitution var actually `export`ed for tempio. For #3, the app code itself has to be ingress-aware. A future cleaner option worth evaluating: building the SPA with a `<base href>` set at runtime, or SvelteKit's `paths.base` fed a sentinel that nginx rewrites — but the sub_filter approach is shipped and works.
+
+### Remaining (user-driven, not blocking)
+
+- Add a `light.test_light` via HA Developer Tools → States, confirm it surfaces in broadsheet's `/settings/house`.
+- Curation persistence: add a person, restart the addon, confirm it survives (validates `addon_config:rw`).
+- aarch64 on real hardware.
