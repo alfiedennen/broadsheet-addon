@@ -211,6 +211,39 @@ Final close-out — every architectural claim exercised against the Env 2 HA OS 
 
 **M5 is closed.** broadsheet installs as an HA add-on, renders its SPA through Ingress, discovers a real HA, and persists curation across restarts.
 
+## M6 — production canary on the real HA (2026-05-14, v0.1.16)
+
+broadsheet installed alongside harold-home on the live ProDesk HA
+(`homeassistant.local`, ~1,960 entities, 191 devices, 9 areas). The
+canary surfaced two real bugs that the empty Env-2 VM never could —
+both fixed and re-verified on the real HA:
+
+**M6.1 — addon was read-only by default.** broadsheet rendered +
+discovered the real house but couldn't control anything: clicking a
+light did nothing. The SPA's safety store defaults `readonly=true` (a
+sound *dev* rail) and the add-on never told it otherwise. The add-on
+*is* the production install — read-only-by-default there is
+broken-by-default. Fix: new `read_only` add-on option (default
+`false`), `run.sh` injects `readOnly` into `window.__BROADSHEET_ENV__`,
+`+layout.svelte`'s `initSafety` honours it in addon mode
+(`broadsheet@a9bb480` + addon `1c0d708`). `lock.*` stays hard-banned
+regardless. Verified: `readOnly: false` reaches the SPA; physical
+light toggle confirmed working on the real house.
+
+**M6.2 — `runtime-env.js` broke on deep-link / refresh.** `app.html`
+loads it via a relative `<script src="./runtime-env.js">`. Fine on the
+ingress root; on a sub-route (or F5 there) it resolved to
+`/<route>/runtime-env.js` → `try_files` → `index.html` (HTML not JS) →
+env never loaded → auth-mode `none` → bounce to `/setup`. Fix: nginx
+`location ~ /runtime-env\.js$` serving the one real file at any path
+depth. Verified: direct-navigating to `/lights/` no longer bounces.
+
+**What the canary proved:** broadsheet handles real scale — 1,967
+entities through discovery with zero broadsheet-side errors (~400× the
+test VM) — renders the real house in the editorial register (real
+prose state, real scenes, real area/light counts), and **controls
+it**. M6 is closed: broadsheet is a working HA dashboard, not a viewer.
+
 ### Genuinely still deferred (not blocking)
 
 - **aarch64 on real hardware** — image builds + is pullable from GHCR; untested on an actual Pi.
