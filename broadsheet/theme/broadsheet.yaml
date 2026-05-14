@@ -1,6 +1,6 @@
 # broadsheet — Home Assistant theme
 #
-# broadsheet-theme-version: 0.1.13
+# broadsheet-theme-version: 0.1.15
 # ^ Machine-readable marker. The add-on updates this file on boot ONLY
 #   while this line is present — that's how it knows broadsheet owns
 #   the file and you haven't made it your own. Delete this single line
@@ -132,6 +132,49 @@ broadsheet:
   input-outlined-hover-border-color: "#c08a4a"
   input-outlined-disabled-border-color: "#211e18"
   input-dropdown-icon-color: "#8a7f6f"      # the ▾ chevron (--fg-muted)
+
+  # ── HA's new --ha-color-* semantic system ─────────────────────────────
+  # The MODERN components — ha-select / ha-picker-field / ha-dropdown —
+  # read these directly. They do NOT touch the --input-* or --mdc-*
+  # layers above (those are the deprecated MWC layer, kept for any HA
+  # surface not yet migrated).
+  #
+  # The catch: HA only swaps in its OWN dark values for these
+  # (`darkSemanticVariables`) when `darkMode` is true — which comes from
+  # the user's profile light/dark toggle or HA's global mode, NEVER from
+  # anything in the theme file (a flat theme cannot self-declare dark).
+  # So on a fresh install with the toggle on Auto/Light, HA applies the
+  # LIGHT --ha-color-* block and you get white dropdown boxes + white
+  # hover states even though every other token is dark.
+  #
+  # Fix: set the structural semantic tokens explicitly. broadsheet then
+  # renders dark regardless of the user's light/dark toggle — which is
+  # the right behaviour for a "replacement" theme: it shouldn't depend
+  # on a second switch. (Picking "Dark" in the profile is still nice —
+  # it makes HA apply its full dark token set — but it's not required.)
+  #
+  # Token reference: frontend/src/resources/theme/color/semantic.globals.ts
+  ha-color-form-background: "#211e18"            # field fill (--bg-raised)
+  ha-color-form-background-hover: "#2a261e"
+  ha-color-form-background-disabled: "#1a1814"
+  ha-color-text-primary: "#f4ede1"               # (--fg)
+  ha-color-text-secondary: "#8a7f6f"             # (--fg-muted)
+  ha-color-text-disabled: "#524a3f"              # (--fg-dim)
+  ha-color-text-link: "#c08a4a"                  # (--accent)
+  ha-color-border-neutral-quiet: "#2a261e"       # (--rule)
+  ha-color-border-neutral-normal: "#3a342a"      # (--rule-strong)
+  ha-color-border-neutral-loud: "#524a3f"
+  # fill-neutral-* drive hover/active backgrounds on sidebar items,
+  # menu rows, list items — the "white hover state" bug lives here.
+  ha-color-fill-neutral-quiet-resting: "#1a1814"
+  ha-color-fill-neutral-quiet-hover: "#232019"
+  ha-color-fill-neutral-quiet-active: "#2a261e"
+  ha-color-fill-neutral-normal-resting: "#211e18"
+  ha-color-fill-neutral-normal-hover: "#2a261e"
+  ha-color-fill-neutral-normal-active: "#211e18"
+  ha-color-fill-neutral-loud-resting: "#524a3f"
+  ha-color-fill-neutral-loud-hover: "#6e6553"
+  ha-color-fill-neutral-loud-active: "#524a3f"
 
   # ── label badges ──────────────────────────────────────────────────────
   label-badge-text-color: "#f4ede1"
