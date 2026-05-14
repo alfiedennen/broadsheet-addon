@@ -72,10 +72,24 @@ http {
         # SvelteKit detect the version skew and reload itself. The
         # sub_filter stays — chunks can carry cross-references to other
         # `/_app/` paths that still need the ingress prefix.
+        # Content-hashed build assets — the filename IS the version, so
+        # cache them hard + forever. Half the fix for the "stale app
+        # shell" class of bug (the other half is no-cache on index.html).
+        location /_app/immutable/ {
+            sub_filter '"/_app/' '"{{ env "INGRESS_ENTRY" }}/_app/';
+            sub_filter "'/_app/" "'{{ env "INGRESS_ENTRY" }}/_app/";
+            try_files $uri =404;
+            add_header Cache-Control "public, max-age=31536000, immutable";
+        }
+
+        # The rest of /_app/ — version.json (SvelteKit's deploy-skew
+        # probe) + env.js — are NOT content-hashed, so they must
+        # revalidate every load or the client never notices a new deploy.
         location /_app/ {
             sub_filter '"/_app/' '"{{ env "INGRESS_ENTRY" }}/_app/';
             sub_filter "'/_app/" "'{{ env "INGRESS_ENTRY" }}/_app/";
             try_files $uri =404;
+            add_header Cache-Control "no-cache";
         }
 
         # Plugin static assets. Each bundled plugin's `static/` dir is
@@ -101,6 +115,13 @@ http {
             # route-data fetches) builds URLs from this base. Rewrite it
             # to the ingress entry so those runtime fetches land on us.
             sub_filter 'base: ""' 'base: "{{ env "INGRESS_ENTRY" }}"';
+            # index.html is the app shell — it references the current
+            # build's hashed entry chunks. It MUST revalidate every load,
+            # or a browser serves a frozen old snapshot forever. No
+            # Cache-Control here previously meant heuristic caching —
+            # exactly that bug. `no-cache` = cache-but-always-revalidate;
+            # nginx answers 304 when unchanged, so it stays cheap.
+            add_header Cache-Control "no-cache";
             try_files $uri $uri/ /index.html;
         }
 
