@@ -198,3 +198,8 @@ For #1 and #2, nginx `sub_filter` is the right tool — but it needs `sendfile o
 - Add a `light.test_light` via HA Developer Tools → States, confirm it surfaces in broadsheet's `/settings/house`.
 - Curation persistence: add a person, restart the addon, confirm it survives (validates `addon_config:rw`).
 - aarch64 on real hardware.
+
+### Known issues — broadsheet HA theme (v0.1.15)
+
+- **White hover states on HA chrome.** Sidebar items / menu rows / list rows still flash white-ish on hover even with the `--ha-color-fill-neutral-*` tokens set. The dropdown *fill* + text are fixed (`--ha-color-form-background` etc landed and verified), but hover backgrounds on some surfaces are reading from a token not yet mapped — likely a `--ha-color-*` variant or a component-local var. Parked deliberately as cosmetic; trace it the same way the others were fixed (component source → exact token → map it) when picking the theme back up. Not a v0.1 blocker.
+- **Methodology note** for whoever continues this: HA is mid-migration across THREE token layers — `--mdc-*` (oldest), `--input-*` (mid), `--ha-color-*` (current). A given surface might read any of them depending on whether its component's been rewritten. The reliable fix loop: reproduce → find the component in `home-assistant/frontend` → grep its styles for which `--*` var drives the broken property → map that var in `broadsheet.yaml`. Don't guess from token names.
