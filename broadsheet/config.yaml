@@ -1,5 +1,5 @@
 name: broadsheet
-version: "0.1.15"
+version: "0.1.16"
 slug: broadsheet
 # We use the hass-base image which already provides s6-overlay as /init.
 # The Supervisor default (`init: true`) would wrap our container with
@@ -78,9 +78,15 @@ options:
   curation_path: /data/broadsheet.json
   region: GB
   tmdb_api_key: ""
+  # false (default) = broadsheet can control your house — turn lights
+  # on/off, set climate, etc. You installed it as your dashboard, so
+  # this is the sane default. Set true to make it a read-only viewer.
+  # (`lock.*` is hard-banned in broadsheet regardless of this setting.)
+  read_only: false
 
 schema:
   log_level: list(trace|debug|info|notice|warning|error|fatal)
   curation_path: str
   region: match(^[A-Z]{2}$)
   tmdb_api_key: password?
+  read_only: bool

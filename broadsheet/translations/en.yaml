@@ -22,6 +22,14 @@ configuration:
       Free key from themoviedb.org/settings/api. Required for the
       @broadsheet/tmdb-tv plugin to surface "New" + "Trending" content
       rows on /tv. Leave blank if you don't use the plugin.
+  read_only:
+    name: Read-only mode
+    description: >
+      Off (default) — broadsheet can control your house: lights,
+      climate, scenes, media. You installed it as your dashboard, so
+      this is the sensible default. Turn ON to make broadsheet a
+      look-but-don't-touch viewer. Door locks are never controllable
+      from broadsheet regardless of this setting.
 
 network:
   8099/tcp: Web UI (only used directly outside ingress mode)

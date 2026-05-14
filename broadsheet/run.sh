@@ -19,11 +19,22 @@ LOG_LEVEL=$(bashio::config 'log_level')
 CURATION_PATH=$(bashio::config 'curation_path')
 TMDB_KEY=$(bashio::config 'tmdb_api_key')
 REGION=$(bashio::config 'region')
+# read_only: false (default) = broadsheet can control the house. The
+# SPA defaults to read-only as a dev-safety rail; in add-on mode the
+# user installed it AS their dashboard, so we flip it writable here
+# unless they explicitly asked for a viewer. Normalised to a JS
+# boolean literal for runtime-env.js below.
+if bashio::config.true 'read_only'; then
+    READ_ONLY="true"
+else
+    READ_ONLY="false"
+fi
 
 bashio::log.level "${LOG_LEVEL}"
 bashio::log.info "broadsheet starting up..."
 bashio::log.info "  curation: ${CURATION_PATH}"
 bashio::log.info "  region:   ${REGION}"
+bashio::log.info "  read_only: ${READ_ONLY}"
 
 # ── 2. Ensure curation directory + default file exists ──────────────
 mkdir -p "$(dirname "${CURATION_PATH}")"
@@ -90,7 +101,11 @@ window.__BROADSHEET_ENV__ = {
   // /api/broadsheet/ location block (HA's ingress proxy strips the
   // prefix before the request reaches us). A bare /api/broadsheet/...
   // would resolve against origin root and 404 on HA's frontend.
-  curationEndpoint: "${INGRESS_ENTRY}/api/broadsheet/curation"
+  curationEndpoint: "${INGRESS_ENTRY}/api/broadsheet/curation",
+  // The add-on is the user's dashboard — writable by default. The SPA
+  // reads this; true makes it a read-only viewer (lock.* hard-banned
+  // either way). Bare word, not a string — it's a JS boolean.
+  readOnly: ${READ_ONLY}
 };
 EOF
 

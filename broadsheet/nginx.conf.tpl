@@ -49,6 +49,20 @@ http {
         # built absolute paths resolve correctly through the ingress proxy.
         # INGRESS_ENTRY comes from bashio (no trailing slash), e.g.
         # `/api/hassio_ingress/<token>`.
+        # runtime-env.js — app.html loads it via a RELATIVE
+        # `<script src="./runtime-env.js">`. On the ingress root that
+        # resolves fine, but on a deep route (/lights/, /heat/…) — or
+        # after an F5 there — it resolves to `/lights/runtime-env.js`,
+        # which `try_files` would fall through to index.html (HTML, not
+        # JS). The script then parse-fails, window.__BROADSHEET_ENV__
+        # never loads, auth-mode reads as 'none' and broadsheet bounces
+        # to /setup. Serve the one real file for ANY depth of request.
+        location ~ /runtime-env\.js$ {
+            alias /usr/share/broadsheet/www/runtime-env.js;
+            default_type application/javascript;
+            add_header Cache-Control "no-store";
+        }
+
         location / {
             sub_filter '"/_app/' '"{{ env "INGRESS_ENTRY" }}/_app/';
             sub_filter "'/_app/" "'{{ env "INGRESS_ENTRY" }}/_app/";

@@ -40,8 +40,20 @@ Eight pages that adapt to whatever your HA install already has:
 | `curation_path` | `/data/broadsheet.json` | Where your settings persist |
 | `region` | `GB` | For TMDB streamer-provider filtering (TMDB plugin only) |
 | `tmdb_api_key` | `""` | Optional; only needed for the @broadsheet/tmdb-tv plugin |
+| `read_only` | `false` | `false` = broadsheet can control your house. `true` = look-but-don't-touch viewer. |
 
 Most users won't need to change any of these.
+
+### `read_only`
+
+Off by default — broadsheet *is* your dashboard, so it can turn lights
+on, set the heating, run scenes, drive the TV. Flip it on if you want
+broadsheet purely as an ambient display with no control.
+
+One thing is **always** off-limits from broadsheet regardless of this
+setting: **door locks**. broadsheet will never call `lock.lock` /
+`lock.unlock` — a UI bug there is too expensive. Lock state is shown;
+lock *control* stays in HA proper.
 
 ## The broadsheet look, applied to Home Assistant itself
 
