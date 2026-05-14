@@ -1,5 +1,5 @@
 name: broadsheet
-version: "0.1.21"
+version: "0.1.22"
 slug: broadsheet
 # We use the hass-base image which already provides s6-overlay as /init.
 # The Supervisor default (`init: true`) would wrap our container with
