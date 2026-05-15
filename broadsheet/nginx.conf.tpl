@@ -17,6 +17,11 @@ http {
     # negligible for a small SPA bundle, so off across the board.
     sendfile      off;
     keepalive_timeout 65;
+    # Match the sidecar's MAX_UPLOAD_BYTES (5 MB) plus envelope headroom.
+    # Default is 1 MB, which 413s any plugin-data upload over 1 MB before
+    # the request ever reaches the sidecar — the sidecar's own 5 MB cap
+    # is the actual policy, this just stops nginx from short-circuiting it.
+    client_max_body_size 10m;
     gzip on;
     gzip_types text/css application/javascript application/json image/svg+xml application/manifest+json;
     access_log /dev/stdout;
