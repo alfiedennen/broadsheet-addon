@@ -121,11 +121,35 @@ async def put_curation(request: web.Request) -> web.Response:
 # traversal and oversized writes; the auth boundary is the HA ingress.
 
 PLUGIN_ID_RE = re.compile(r'^[a-z0-9][a-z0-9-]{0,62}$')
-FILENAME_RE = re.compile(
-    r'^[A-Za-z0-9._-]{1,128}\.(png|jpg|jpeg|svg|webp|gif|json)$',
-    re.IGNORECASE,
-)
+# Filename rules: structural defense (Path.resolve + relative_to) is the
+# real guard against path traversal — see _file_path. The validator
+# below blocks the chars that are unambiguously dangerous (path
+# separators, control bytes, leading dot, `..`) and demands an image
+# extension. Everything else is permitted, including spaces,
+# parentheses, apostrophes, unicode — real-world filenames the user
+# typed themselves should round-trip without sanitisation. The earlier
+# `[A-Za-z0-9._-]` regex was paranoid and rejected names like
+# "Elena's office.png" — annoying with no security upside.
+ALLOWED_EXT_RE = re.compile(r'\.(png|jpg|jpeg|svg|webp|gif|json)$', re.IGNORECASE)
+BAD_CHARS_RE = re.compile(r'[\x00-\x1f\x7f/\\]')
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024  # 5 MB per file — generous for paintings
+
+
+def _validate_filename(name: str) -> str | None:
+    """None if `name` is a safe upload filename; else a human error message."""
+    if not name or not name.strip():
+        return 'filename is empty'
+    if len(name) > 128:
+        return f'filename too long ({len(name)} chars; max 128)'
+    if BAD_CHARS_RE.search(name):
+        return 'filename contains path separators or control characters'
+    if '..' in name:
+        return 'filename contains ".."'
+    if name.startswith('.'):
+        return 'filename must not start with "."'
+    if not ALLOWED_EXT_RE.search(name):
+        return 'filename must end with .png, .jpg, .jpeg, .svg, .webp, .gif, or .json'
+    return None
 
 
 def _plugin_dir(request: web.Request, plugin_id: str) -> Path | None:
@@ -143,19 +167,24 @@ def _plugin_dir(request: web.Request, plugin_id: str) -> Path | None:
     return d
 
 
-def _file_path(d: Path, filename: str) -> Path | None:
-    """Resolved file path inside plugin dir, with traversal guard. None if invalid."""
-    if not FILENAME_RE.fullmatch(filename):
-        return None
-    d_resolved = d.resolve() if d.exists() else d
+def _file_path(d: Path, filename: str) -> tuple[Path | None, str | None]:
+    """
+    Resolved file path inside plugin dir + traversal guard.
+
+    Returns (path, None) on success, or (None, error_message) on failure
+    so callers can surface the specific reason to the user instead of a
+    generic "invalid filename".
+    """
+    err = _validate_filename(filename)
+    if err is not None:
+        return None, err
+    d_resolved = d.resolve() if d.exists() else d.parent.resolve() / d.name
     p = (d / filename).resolve()
     try:
-        # Use the not-yet-existing form for both sides so the comparison works
-        # before the dir is created.
-        p.relative_to(d_resolved if d.exists() else d.parent.resolve() / d.name)
+        p.relative_to(d_resolved)
     except ValueError:
-        return None
-    return p
+        return None, 'filename resolves outside the plugin data directory'
+    return p, None
 
 
 async def list_plugin_data(request: web.Request) -> web.Response:
@@ -190,17 +219,9 @@ async def upload_plugin_data(request: web.Request) -> web.Response:
         )
 
     filename = field.filename or ''
-    fp = _file_path(d, filename)
+    fp, err = _file_path(d, filename)
     if fp is None:
-        return web.json_response(
-            {
-                'error': (
-                    'invalid filename — must match [A-Za-z0-9._-]{1,128} '
-                    'and end .png/.jpg/.jpeg/.svg/.webp/.gif/.json'
-                )
-            },
-            status=400,
-        )
+        return web.json_response({'error': err or 'invalid filename'}, status=400)
 
     d.mkdir(parents=True, exist_ok=True)
 
@@ -237,9 +258,9 @@ async def delete_plugin_data(request: web.Request) -> web.Response:
     d = _plugin_dir(request, plugin_id)
     if d is None:
         return web.json_response({'error': 'invalid plugin id'}, status=400)
-    fp = _file_path(d, filename)
+    fp, err = _file_path(d, filename)
     if fp is None:
-        return web.json_response({'error': 'invalid filename'}, status=400)
+        return web.json_response({'error': err or 'invalid filename'}, status=400)
     if not fp.exists():
         return web.json_response({'error': 'not found'}, status=404)
     try:
