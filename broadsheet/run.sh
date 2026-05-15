@@ -191,10 +191,18 @@ else
     bashio::log.notice "Couldn't reach ${HA_THEMES_DIR} — skipping theme install (is homeassistant_config mapped?)"
 fi
 
+# ── 5c. Ensure plugin-data root exists ──────────────────────────────
+# User-uploaded plugin assets land under /data/plugin-data/<id>/. /data
+# is the addon's persistent volume so files survive add-on updates.
+# Plugins write via the sidecar's POST /api/broadsheet/plugin-data/<id>;
+# nginx serves at /plugin-data/<id>/<filename>. mkdir is idempotent.
+mkdir -p /data/plugin-data
+
 # ── 6. Start sidecar (curation API on localhost) ────────────────────
-bashio::log.info "Starting sidecar (curation API on localhost:8100)..."
+bashio::log.info "Starting sidecar (curation + plugin-data API on localhost:8100)..."
 python3 /usr/share/broadsheet/sidecar.py \
     --curation-path "${CURATION_PATH}" \
+    --plugin-data-root /data/plugin-data \
     --bind 127.0.0.1:8100 &
 SIDECAR_PID=$!
 

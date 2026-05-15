@@ -105,6 +105,24 @@ http {
             add_header Cache-Control "public, max-age=300";
         }
 
+        # User-uploaded plugin data — counterpart to /plugin-assets/.
+        # Bundled assets live in the image and are immutable per build;
+        # plugin DATA lives in /data/plugin-data/<id>/ on the addon's
+        # persistent volume. Different lifecycles (assets are cached
+        # hard, data is replaceable + short-lived in cache), different
+        # source paths, same URL pattern.
+        # CSP default-src 'none' is belt-and-braces against
+        # script-bearing SVG uploads — browsers don't run scripts in
+        # SVG-as-img anyway, but the header makes that explicit and
+        # closes any future load-as-object footguns.
+        location /plugin-data/ {
+            alias /data/plugin-data/;
+            try_files $uri =404;
+            add_header Cache-Control "public, max-age=60, must-revalidate";
+            add_header Content-Security-Policy "default-src 'none'";
+            add_header X-Content-Type-Options "nosniff";
+        }
+
         location / {
             sub_filter '"/_app/' '"{{ env "INGRESS_ENTRY" }}/_app/';
             sub_filter "'/_app/" "'{{ env "INGRESS_ENTRY" }}/_app/";
