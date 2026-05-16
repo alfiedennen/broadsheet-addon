@@ -20,12 +20,18 @@ COPY run.sh /etc/services.d/broadsheet/run
 COPY nginx.conf.tpl /etc/nginx/nginx.conf.tpl
 COPY sidecar.py /usr/share/broadsheet/sidecar.py
 
-# Init scripts run by run.sh BEFORE nginx starts. sidebar.py applies
-# (or reverts) the HA frontend takeover — writes per-user user_data
-# so HA's sidebar collapses + broadsheet becomes the default landing
-# surface. Idempotent + runs every boot. See
-# docs/plans/plan-sidebar-takeover.md for the design.
+# Init scripts run by run.sh BEFORE nginx starts. register-launcher.py
+# registers a Lovelace dashboard + resource so HA's sidebar has a
+# "Broadsheet" entry; tapping it loads a one-line custom-element that
+# redirects window.top to broadsheet's standalone URL (no HA chrome).
+# Idempotent + runs every boot. See
+# docs/plans/plan-theme-G-frontend-not-panel.md for the design.
 COPY init/ /usr/share/broadsheet/init/
+
+# Lovelace launcher JS template — copied to the user's
+# /homeassistant/www/ on every boot (with @@PORT@@ substituted), then
+# registered as a Lovelace resource by register-launcher.py.
+COPY launcher-template.js /usr/share/broadsheet/launcher-template.js
 
 # The broadsheet HA theme — run.sh drops this into the user's
 # /homeassistant/themes/ on first boot (never overwriting).
@@ -46,7 +52,7 @@ COPY www/ /usr/share/broadsheet/www/
 
 RUN chmod +x /etc/services.d/broadsheet/run
 
-EXPOSE 8099
+EXPOSE 8124
 
 # No CMD — hass-base's /init (s6-overlay) handles startup via
 # /etc/services.d/broadsheet/run.

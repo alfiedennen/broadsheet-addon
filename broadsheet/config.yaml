@@ -1,5 +1,5 @@
 name: broadsheet
-version: "0.1.73"
+version: "0.2.0"
 slug: broadsheet
 # We use the hass-base image which already provides s6-overlay as /init.
 # The Supervisor default (`init: true`) would wrap our container with
@@ -28,41 +28,40 @@ image: ghcr.io/alfiedennen/broadsheet-{arch}
 startup: services
 boot: auto
 
-# Web UI — what HA links from the add-on page (also wired into the
-# sidebar via panel_*)
-webui: http://[HOST]:[PORT:8099]
-ingress: true
-# ingress_port: 0 lets Supervisor allocate dynamically — avoids
-# collisions with other add-ons. Hard-coded ports are an anti-pattern.
-ingress_port: 0
-# WebSocket support through the ingress proxy. Without this, WS frames
-# buffer + you get mysterious lag.
-ingress_stream: true
-
-# Sidebar entry — show in HA's left nav, one click from anywhere
-panel_icon: mdi:home-heart
-panel_title: broadsheet
-# panel_admin: true means only HA admins can open the panel. Default
-# to true since the panel exposes full HA Core API access (subject
-# to safety rails). Users can lower in their config if they want.
-panel_admin: true
-# Without this, the addon installs and is reachable via "Open Web UI"
-# on its addon page, but it does NOT appear in HA's sidebar by default.
-# (Supervisor defaults this to false even when panel_icon/panel_title
-# are set — verified during M5 verification on 2026-05-13.) For an
-# editorial frontend that's meant to be one click away, sidebar
-# placement is the whole point.
-ingress_panel: true
+# ── v0.2 architecture: broadsheet served on a dedicated host port ──────
+# v0.1 ran broadsheet inside an HA ingress iframe — which meant HA's
+# panel chrome (top bar + hamburger + addon name label) wrapped every
+# broadsheet page. v0.2 bypasses ingress entirely: addon container
+# still runs nginx + sidecar, but on a dedicated port the browser
+# hits directly. No HA chrome anywhere. broadsheet IS the page.
+#
+# Sidebar discoverability: on first boot, the addon registers a
+# Lovelace dashboard via WS API that points at a launcher card; one
+# tap from HA's sidebar → window.top redirect → broadsheet's URL.
+# See init/register-launcher.py.
+#
+# Default port 8124 (avoids common addon collisions: Music Assistant
+# 8095, Zigbee2MQTT 8485, ESPHome 6052). Configurable via add-on UI:
+# Settings → Add-ons → broadsheet → Network → change "Web frontend"
+# mapping. If you change the host port, also update the launcher's
+# target via the "host_port_override" option below (because the
+# Lovelace launcher JS bakes the port at install time).
+ports:
+  8124/tcp: 8124
+ports_description:
+  8124/tcp: Web frontend — your dashboard URL
+webui: http://[HOST]:[PORT:8124]
 
 # Map the add-on's persistent /data/ to the HA snapshot system.
 # `addon_config:rw` makes /data/broadsheet.json survive container
 # restarts AND be included in HA backups.
 #
 # `homeassistant_config:rw` mounts the user's HA config dir at
-# /homeassistant. We use it ONLY to drop broadsheet.yaml into
-# /homeassistant/themes/ on first boot (never overwriting) — the v0.1
-# half of the replacement vision. The add-on touches nothing else in
-# the user's config; the theme is fully opt-in + reversible.
+# /homeassistant. We use it to:
+#   - Drop broadsheet.yaml into /homeassistant/themes/ (opt-in HA theme)
+#   - Drop the launcher JS into /homeassistant/www/ (Lovelace serves
+#     this at /local/ — required for the panel_custom redirect element)
+# The add-on touches nothing else in the user's config.
 map:
   - addon_config:rw
   - homeassistant_config:rw
@@ -83,16 +82,10 @@ options:
   # this is the sane default. Set true to make it a read-only viewer.
   # (`lock.*` is hard-banned in broadsheet regardless of this setting.)
   read_only: false
-  # true (default) = on each boot, collapse HA's sidebar globally and
-  # make broadsheet the default landing surface for every HA user.
-  # Per-user writes via `frontend/set_user_data` against `auth/list` —
-  # see init/sidebar.py. A first-launch banner inside broadsheet
-  # explains what happened + how to revert. Set false to keep HA's
-  # sidebar in place and run broadsheet as a peer frontend alongside
-  # HA's native UI (the V0.0 behaviour). Roll-back is one toggle +
-  # addon restart — sidebar.py runs in reverse and restores HA's
-  # defaults. See docs/plans/plan-sidebar-takeover.md for the design.
-  sidebar_takeover: true
+  # If you changed the host port in Network settings AND want the
+  # sidebar entry to redirect to that custom port, set this. Leave as
+  # 0 to use the default 8124. (v0.2.1 will detect this automatically.)
+  host_port_override: 0
 
 schema:
   log_level: list(trace|debug|info|notice|warning|error|fatal)
@@ -100,4 +93,4 @@ schema:
   region: match(^[A-Z]{2}$)
   tmdb_api_key: password?
   read_only: bool
-  sidebar_takeover: bool
+  host_port_override: int(0,65535)

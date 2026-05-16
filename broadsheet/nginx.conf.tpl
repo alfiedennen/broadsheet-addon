@@ -6,150 +6,81 @@ events {
     worker_connections 1024;
 }
 
-# Connection-upgrade map for WebSocket support — required by ingress_stream.
 http {
     include       /etc/nginx/mime.types;
     default_type  application/octet-stream;
-    # sendfile() bypasses nginx's user-space content filter chain — kernel
-    # copies file → socket directly. sub_filter (which we use to rewrite
-    # SvelteKit's absolute /_app/ asset paths) lives in that filter chain
-    # and cannot operate on sendfile responses. Performance hit is
-    # negligible for a small SPA bundle, so off across the board.
-    sendfile      off;
+    sendfile      on;
     keepalive_timeout 65;
     # Match the sidecar's MAX_UPLOAD_BYTES (5 MB) plus envelope headroom.
-    # Default is 1 MB, which 413s any plugin-data upload over 1 MB before
-    # the request ever reaches the sidecar — the sidecar's own 5 MB cap
-    # is the actual policy, this just stops nginx from short-circuiting it.
     client_max_body_size 10m;
     gzip on;
     gzip_types text/css application/javascript application/json image/svg+xml application/manifest+json;
     access_log /dev/stdout;
 
+    # Connection-upgrade map for WebSocket support (HA WS proxy below).
     map $http_upgrade $connection_upgrade {
         default upgrade;
         ''      close;
     }
 
-    # Sub-filter rewrites SvelteKit's absolute asset paths.
-    # Built SPA emits `<link href="/_app/immutable/...">` because adapter-static
-    # in fallback mode can't know the runtime URL prefix at build time, and
-    # SvelteKit's `paths.relative` only applies to `%sveltekit.assets%`-style
-    # template variables — NOT to module preload tags it emits itself. Without
-    # rewriting, the browser requests `/_app/...` from origin root (HA frontend),
-    # gets 404s for every chunk, and the SPA never boots.
-    sub_filter_once off;
-    # text/html is implicit (nginx's default sub_filter_types value);
-    # listing it explicitly triggers a "duplicate MIME type" warning at
-    # boot. We only need to ADD application/javascript + text/css so the
-    # rewriter sees module preload paths in JS chunks + CSS asset URLs.
-    sub_filter_types application/javascript text/css;
-
     server {
-        listen {{ env "INGRESS_PORT" }} default_server;
+        # v0.2 architecture: broadsheet on a dedicated host port,
+        # bypassing HA ingress entirely. nginx listens on 8124 inside
+        # the container; the addon's `ports:` block maps to the same
+        # host port by default (user-configurable via Network settings).
+        # The browser hits this directly — no HA chrome, no ingress
+        # token rewrites, no sub_filter games on every chunk.
+        listen 8124 default_server;
         server_name _;
 
         root /usr/share/broadsheet/www;
         index index.html;
 
-        # SPA fallback — any unknown path serves index.html so the
-        # SvelteKit client-side router can take over.
-        # sub_filter rewrites `/_app/` to `<ingress_entry>/_app/` so the
-        # built absolute paths resolve correctly through the ingress proxy.
-        # INGRESS_ENTRY comes from bashio (no trailing slash), e.g.
-        # `/api/hassio_ingress/<token>`.
-        # runtime-env.js — app.html loads it via a RELATIVE
-        # `<script src="./runtime-env.js">`. On the ingress root that
-        # resolves fine, but on a deep route (/lights/, /heat/…) — or
-        # after an F5 there — it resolves to `/lights/runtime-env.js`,
-        # which `try_files` would fall through to index.html (HTML, not
-        # JS). The script then parse-fails, window.__BROADSHEET_ENV__
-        # never loads, auth-mode reads as 'none' and broadsheet bounces
-        # to /setup. Serve the one real file for ANY depth of request.
+        # runtime-env.js — app.html loads it via RELATIVE
+        # `<script src="./runtime-env.js">`. On the root it resolves
+        # fine, but on a deep route (/lights/, /heat/…) — or after an
+        # F5 there — it'd resolve to `/lights/runtime-env.js`, which
+        # `try_files` would fall through to index.html (HTML, not JS),
+        # the script parse-fails, window.__BROADSHEET_ENV__ never loads,
+        # auth-mode reads as 'none' and broadsheet bounces to /setup
+        # with no context. Serve the one real file for any depth.
         location ~ /runtime-env\.js$ {
             alias /usr/share/broadsheet/www/runtime-env.js;
             default_type application/javascript;
             add_header Cache-Control "no-store";
         }
 
-        # Built immutable assets — a missing file must return a REAL
-        # 404, never the index.html SPA fallback. When the add-on
-        # updates under an open tab, that tab's SvelteKit runtime asks
-        # for OLD chunk hashes; if `try_files` fed it index.html (200,
-        # text/html) the browser chokes with "expected a JS module, got
-        # text/html" and the app wedges. A clean 404 instead lets
-        # SvelteKit detect the version skew and reload itself. The
-        # sub_filter stays — chunks can carry cross-references to other
-        # `/_app/` paths that still need the ingress prefix.
-        # Content-hashed build assets — the filename IS the version, so
-        # cache them hard + forever. Half the fix for the "stale app
-        # shell" class of bug (the other half is no-cache on index.html).
+        # Content-hashed build assets — filename IS the version, cache
+        # forever. Missing files MUST return a real 404 (never the SPA
+        # fallback) so SvelteKit can detect version skew when a tab
+        # outlives a deploy and reload itself.
         location /_app/immutable/ {
-            sub_filter '"/_app/' '"{{ env "INGRESS_ENTRY" }}/_app/';
-            sub_filter "'/_app/" "'{{ env "INGRESS_ENTRY" }}/_app/";
             try_files $uri =404;
             add_header Cache-Control "public, max-age=31536000, immutable";
         }
 
-        # The rest of /_app/ — version.json (SvelteKit's deploy-skew
-        # probe) + env.js — are NOT content-hashed, so they must
-        # revalidate every load or the client never notices a new deploy.
+        # Non-hashed /_app/ (version.json, env.js) — must revalidate.
         location /_app/ {
-            sub_filter '"/_app/' '"{{ env "INGRESS_ENTRY" }}/_app/';
-            sub_filter "'/_app/" "'{{ env "INGRESS_ENTRY" }}/_app/";
             try_files $uri =404;
             add_header Cache-Control "no-cache";
         }
 
-        # Plugin static assets. Each bundled plugin's `static/` dir is
-        # staged into the image at www/plugin-assets/<plugin-id>/ by
-        # CI; plugin code references them via pluginAssetUrl(), which
-        # resolves to /plugin-assets/<id>/… (ingress-prefixed at
-        # runtime). A dedicated namespace — NOT /local/<id>/ — because
-        # `location /local/` below already proxies to HA Core's own
-        # www folder; plugin assets would collide. Missing files 404
-        # cleanly (same reasoning as /_app/ — never the SPA fallback).
+        # Plugin static assets — staged into image at
+        # www/plugin-assets/<id>/ by CI. Bundled with build.
         location /plugin-assets/ {
             try_files $uri =404;
             add_header Cache-Control "public, max-age=300";
         }
 
-        # User-uploaded plugin data — counterpart to /plugin-assets/.
-        # Bundled assets live in the image and are immutable per build;
-        # plugin DATA lives in /data/plugin-data/<id>/ on the addon's
-        # persistent volume. Different lifecycles (assets are cached
-        # hard, data is replaceable + short-lived in cache), different
-        # source paths, same URL pattern.
+        # User-uploaded plugin data — lives on /data/ persistent volume.
         # CSP default-src 'none' is belt-and-braces against
-        # script-bearing SVG uploads — browsers don't run scripts in
-        # SVG-as-img anyway, but the header makes that explicit and
-        # closes any future load-as-object footguns.
+        # script-bearing SVG uploads.
         location /plugin-data/ {
             alias /data/plugin-data/;
             try_files $uri =404;
             add_header Cache-Control "public, max-age=60, must-revalidate";
             add_header Content-Security-Policy "default-src 'none'";
             add_header X-Content-Type-Options "nosniff";
-        }
-
-        location / {
-            sub_filter '"/_app/' '"{{ env "INGRESS_ENTRY" }}/_app/';
-            sub_filter "'/_app/" "'{{ env "INGRESS_ENTRY" }}/_app/";
-            sub_filter '"/favicon' '"{{ env "INGRESS_ENTRY" }}/favicon';
-            # SvelteKit bakes `base: ""` into the inline bootstrap script
-            # because adapter-static + fallback mode can't know the serve
-            # URL at build time. Its entire runtime (version polling,
-            # route-data fetches) builds URLs from this base. Rewrite it
-            # to the ingress entry so those runtime fetches land on us.
-            sub_filter 'base: ""' 'base: "{{ env "INGRESS_ENTRY" }}"';
-            # index.html is the app shell — it references the current
-            # build's hashed entry chunks. It MUST revalidate every load,
-            # or a browser serves a frozen old snapshot forever. No
-            # Cache-Control here previously meant heuristic caching —
-            # exactly that bug. `no-cache` = cache-but-always-revalidate;
-            # nginx answers 304 when unchanged, so it stays cheap.
-            add_header Cache-Control "no-cache";
-            try_files $uri $uri/ /index.html;
         }
 
         # ── Curation API — proxy to the sidecar Python service ──
@@ -159,11 +90,7 @@ http {
             proxy_set_header X-Real-IP $remote_addr;
         }
 
-        # ── Harold preset API — sidecar serves bundled wakeword
-        # artefacts + meeting-mode blueprint install/uninstall. Same
-        # sidecar, different path prefix. Routes registered in
-        # sidecar.py under /harold-preset/* (nginx strips the /api/
-        # prefix via the trailing slash convention).
+        # ── Harold preset API — same sidecar, /harold-preset/ prefix ──
         location /api/harold-preset/ {
             proxy_pass http://127.0.0.1:8100/harold-preset/;
             proxy_set_header Host $host;
@@ -171,12 +98,17 @@ http {
         }
 
         # ── HA Core API + WebSocket via Supervisor ──
-        # The crucial trick: SUPERVISOR_TOKEN is auto-injected as an
-        # env var by HA. We expose it via the Authorization header on
-        # every proxied request. The SPA never sees a token, never
-        # pastes one — it just talks to its own origin.
-        location /api/ {
-            proxy_pass http://supervisor/core/api/;
+        # Same SUPERVISOR_TOKEN injection pattern as v0.1 — broadsheet's
+        # frontend talks to its own origin, nginx injects the auth
+        # header on the way to HA Core. No user-side LLAT needed for
+        # the default install.
+        #
+        # The browser-side WS auth message still sends the token (HA
+        # WS protocol requires it explicitly), so runtime-env.js carries
+        # supervisorToken (baked by run.sh, rotates per container). The
+        # nginx Authorization header injection is for REST calls only.
+        location /api/websocket {
+            proxy_pass http://supervisor/core/api/websocket;
             proxy_set_header Authorization "Bearer {{ env "SUPERVISOR_TOKEN" }}";
             proxy_http_version 1.1;
             proxy_set_header Upgrade $http_upgrade;
@@ -185,14 +117,32 @@ http {
             proxy_read_timeout 86400;
             proxy_buffering off;
         }
+        location /api/ {
+            proxy_pass http://supervisor/core/api/;
+            proxy_set_header Authorization "Bearer {{ env "SUPERVISOR_TOKEN" }}";
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_read_timeout 86400;
+            proxy_buffering off;
+        }
 
-        # ── HA static /local/* — paintings, plugin assets, etc. ──
-        # Same pattern: bearer-injected proxy to the supervisor's HA
-        # Core endpoint.
+        # ── HA static /local/* — paintings + user uploads ──
         location /local/ {
             proxy_pass http://supervisor/core/local/;
             proxy_set_header Authorization "Bearer {{ env "SUPERVISOR_TOKEN" }}";
             proxy_set_header Host $host;
+        }
+
+        # ── SPA fallback ──
+        # In v0.1 we needed sub_filter rewrites here to inject the
+        # ingress URL prefix into every asset path. v0.2 doesn't go
+        # through ingress, so the build's bare /_app/... paths resolve
+        # against this nginx directly. No rewrites needed.
+        # index.html must revalidate every load (it references current
+        # hashed entry chunks); SvelteKit answers 304 when unchanged.
+        location / {
+            add_header Cache-Control "no-cache";
+            try_files $uri $uri/ /index.html;
         }
     }
 }

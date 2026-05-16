@@ -1,51 +1,59 @@
 #!/usr/bin/with-contenv bashio
 # shellcheck shell=bash
 #
-# broadsheet add-on entrypoint.
+# broadsheet add-on entrypoint — v0.2 architecture.
+#
+# v0.1 ran broadsheet inside an HA ingress iframe, with all the
+# accompanying chrome (top bar + sidebar + addon-name label). v0.2
+# bypasses ingress entirely: nginx listens on a dedicated host port
+# (default 8124) and the browser hits it directly. No HA chrome
+# wrapping any page.
 #
 # Sequence:
-#   1. Read add-on options
+#   1. Read addon options + addon version
 #   2. Ensure curation file exists at the configured path
-#   3. Read SUPERVISOR_TOKEN (auto-injected by HA) + ingress_entry
-#   4. Write runtime-env.js so the SPA picks up env vars before boot
-#   5. Render nginx.conf from the template (substitutes ingress_port)
-#   6. Start the sidecar (curation API on localhost:8100)
-#   7. Exec nginx in the foreground
+#   3. Read SUPERVISOR_TOKEN (auto-injected by HA)
+#   4. Write runtime-env.js so the SPA picks up env vars at boot
+#   5. Render nginx.conf from the template
+#   6. Install the broadsheet HA theme (opt-in, version-marker logic)
+#   7. Install the Lovelace launcher JS to /homeassistant/www/
+#   8. Register the Lovelace launcher (sidebar entry) in background
+#   9. Start the sidecar (curation API on localhost:8100)
+#   10. Exec nginx in the foreground
+#   11. On SIGTERM: uninstall the Lovelace launcher cleanly
 
 set -e
+
+# Addon version — used to version the launcher resource URL so
+# cache busts cleanly on upgrade. bashio doesn't expose this directly;
+# we read from the runtime-injected env (HA supervisor sets ADDON_VERSION
+# in some contexts but not reliably) so fall back to config.yaml's
+# hardcoded version baked into image at build time.
+ADDON_VERSION="${ADDON_VERSION:-0.2.0}"
 
 # ── 1. Read add-on options ──────────────────────────────────────────
 LOG_LEVEL=$(bashio::config 'log_level')
 CURATION_PATH=$(bashio::config 'curation_path')
 TMDB_KEY=$(bashio::config 'tmdb_api_key')
 REGION=$(bashio::config 'region')
-# read_only: false (default) = broadsheet can control the house. The
-# SPA defaults to read-only as a dev-safety rail; in add-on mode the
-# user installed it AS their dashboard, so we flip it writable here
-# unless they explicitly asked for a viewer. Normalised to a JS
-# boolean literal for runtime-env.js below.
 if bashio::config.true 'read_only'; then
     READ_ONLY="true"
 else
     READ_ONLY="false"
 fi
-# sidebar_takeover: true (default) = on each boot, collapse HA's
-# sidebar globally + make broadsheet the default landing surface for
-# every HA user. See init/sidebar.py for the per-user WS writes. Set
-# false to keep HA's sidebar in place + run broadsheet as a peer
-# frontend. Roll-back is one toggle + addon restart.
-if bashio::config.true 'sidebar_takeover'; then
-    SIDEBAR_TAKEOVER="on"
+HOST_PORT_OVERRIDE=$(bashio::config 'host_port_override')
+if [ "$HOST_PORT_OVERRIDE" -eq 0 ] 2>/dev/null; then
+    HOST_PORT=8124
 else
-    SIDEBAR_TAKEOVER="off"
+    HOST_PORT="$HOST_PORT_OVERRIDE"
 fi
 
 bashio::log.level "${LOG_LEVEL}"
-bashio::log.info "broadsheet starting up..."
+bashio::log.info "broadsheet ${ADDON_VERSION} starting up..."
 bashio::log.info "  curation: ${CURATION_PATH}"
 bashio::log.info "  region:   ${REGION}"
 bashio::log.info "  read_only: ${READ_ONLY}"
-bashio::log.info "  sidebar_takeover: ${SIDEBAR_TAKEOVER}"
+bashio::log.info "  host port: ${HOST_PORT} (launcher targets http://<host>:${HOST_PORT}/)"
 
 # ── 2. Ensure curation directory + default file exists ──────────────
 mkdir -p "$(dirname "${CURATION_PATH}")"
@@ -75,105 +83,57 @@ if [ ! -f "${CURATION_PATH}" ]; then
   "plugins": {
     "emanations": {"enabled": false, "config": {}},
     "ghost-cloud": {"enabled": false, "config": {}},
-    "tmdb-tv": {"enabled": false, "config": {}}
+    "tmdb-tv": {"enabled": false, "config": {}},
+    "voice": {"enabled": false, "config": {}},
+    "harold-preset": {"enabled": false, "config": {}}
   }
 }
 EOF
 fi
 
-# ── 3. Discover ingress URL + Supervisor token ──────────────────────
-# Supervisor exposes the add-on's assigned ingress entry via bashio.
-# SUPERVISOR_TOKEN is auto-injected as an env var by HA itself.
-INGRESS_ENTRY=$(bashio::addon.ingress_entry)
-INGRESS_PORT=$(bashio::addon.ingress_port)
-bashio::log.info "  ingress entry: ${INGRESS_ENTRY}"
-bashio::log.info "  ingress port:  ${INGRESS_PORT}"
-
+# ── 3. Discover SUPERVISOR_TOKEN ────────────────────────────────────
 if [ -z "${SUPERVISOR_TOKEN}" ]; then
     bashio::log.error "SUPERVISOR_TOKEN is empty — addon won't be able to talk to HA"
     exit 1
 fi
 
 # ── 4. Write runtime-env.js for the SPA ─────────────────────────────
-# The SPA reads window.__BROADSHEET_ENV__ at boot to detect addon
-# mode + get the credentials. Written fresh on every container boot
-# so the SUPERVISOR_TOKEN is always current (it rotates).
+# Same as v0.1 but smaller — no ingress prefix to inject anywhere, so
+# curationEndpoint is just a relative path and ingressEntry is gone.
+# supervisorToken still rides along because the SPA uses it for WS
+# authentication (browser-side WS connects to /api/websocket which
+# nginx proxies to supervisor/core; HA's WS auth still wants the token
+# in the auth message).
 mkdir -p /usr/share/broadsheet/www
-# Normalise sidebar_takeover for the runtime env — true if option is
-# enabled, false otherwise. The SPA's TakeoverBanner reads this to
-# decide whether to show the first-launch advisory; without the
-# gate, the banner would appear even after the user has rolled back
-# the takeover with `sidebar_takeover: false`.
-SIDEBAR_TAKEOVER_JS=$([ "${SIDEBAR_TAKEOVER}" = "on" ] && echo "true" || echo "false")
 cat > /usr/share/broadsheet/www/runtime-env.js <<EOF
 // Injected by run.sh on every container boot.
 // SUPERVISOR_TOKEN rotates per container lifetime; this file is
 // re-generated every start, never persisted in the image.
 window.__BROADSHEET_ENV__ = {
-  ingressEntry: "${INGRESS_ENTRY}",
   supervisorToken: "${SUPERVISOR_TOKEN}",
   region: "${REGION}",
   tmdbKey: $([ -n "${TMDB_KEY}" ] && echo "\"${TMDB_KEY}\"" || echo "null"),
-  // Ingress-prefixed so the SPA's curation client hits THIS nginx's
-  // /api/broadsheet/ location block (HA's ingress proxy strips the
-  // prefix before the request reaches us). A bare /api/broadsheet/...
-  // would resolve against origin root and 404 on HA's frontend.
-  curationEndpoint: "${INGRESS_ENTRY}/api/broadsheet/curation",
+  // Same-origin in v0.2 (no ingress prefix to dodge).
+  curationEndpoint: "/api/broadsheet/curation",
   // The add-on is the user's dashboard — writable by default. The SPA
   // reads this; true makes it a read-only viewer (lock.* hard-banned
   // either way). Bare word, not a string — it's a JS boolean.
-  readOnly: ${READ_ONLY},
-  // Whether the addon's HA frontend takeover is currently ACTIVE.
-  // The SPA's TakeoverBanner gates on this — only shows the
-  // first-launch advisory if takeover actually happened. Boolean.
-  sidebarTakeover: ${SIDEBAR_TAKEOVER_JS}
+  readOnly: ${READ_ONLY}
 };
 EOF
 
 # ── 5. Render nginx config from template ────────────────────────────
-# tempio is bundled in hass-base — substitutes env vars into the
-# template via Go template syntax + the `env` function. Two CLI gotchas
-# to remember (each cost a debugging round in the M5 verification):
-#   - Flag is `-template`, not `-conf`. Wrong flag → tempio errors with
-#     `Missing template argument` and exits.
-#   - tempio reads its data context from STDIN as JSON. We don't have
-#     non-env data, so we pipe `{}` to satisfy the parser. Without it
-#     tempio also errors out.
-# Pattern lifted verbatim from home-assistant/addons/mosquitto.
-# All three vars MUST be exported — tempio's `{{ env "X" }}` reads the
-# process environment, not shell-local variables. INGRESS_ENTRY was the
-# one that bit us: left unexported, tempio rendered it as empty string,
-# making the nginx sub_filter rewrite (`"/_app/` → `"<entry>/_app/`) a
-# silent no-op, and the SPA kept 404ing on every asset.
-export INGRESS_PORT
-export INGRESS_ENTRY
-export SUPERVISOR_TOKEN
 echo "{}" | tempio -template /etc/nginx/nginx.conf.tpl -out /etc/nginx/nginx.conf
 
-# ── 5b. Offer / update the broadsheet HA theme ──────────────────────
-# The v0.1 half of the "replacement vision" — restyle HA's own chrome
-# to broadsheet's editorial register so dropping into HA's native
-# config pages isn't a jarring context switch. Strictly opt-in:
-#   - Nothing changes until the user picks it in their HA profile.
-#   - Fully reversible — switch theme back, delete the file.
-#
-# Update policy (so theme FIXES actually reach users, without ever
-# clobbering a user's own edits):
-#   - File absent              → first-boot install.
-#   - File present, OUR marker → broadsheet owns it. Update only if
-#                                the shipped version differs.
-#   - File present, NO marker  → the user has made it their own
-#                                (or stripped the marker on purpose).
-#                                Never touch it.
-# The marker is the `# broadsheet-theme-version: X.Y.Z` line in the
-# theme file. /homeassistant is the `homeassistant_config:rw` mount.
+# ── 6. Offer / update the broadsheet HA theme ──────────────────────
+# Unchanged from v0.1: opt-in theme, fully reversible, marker-pattern
+# update logic preserves user-edited copies.
 HA_THEMES_DIR="/homeassistant/themes"
 THEME_SRC="/usr/share/broadsheet/theme/broadsheet.yaml"
 THEME_DST="${HA_THEMES_DIR}/broadsheet.yaml"
 THEME_MARKER="broadsheet-theme-version:"
 
 theme_version_of() {
-    # Echo the version after the marker in $1, or empty if no marker.
     grep -oE "${THEME_MARKER} *[0-9.]+" "$1" 2>/dev/null | head -1 \
         | sed -E "s/.*${THEME_MARKER} *//"
 }
@@ -181,8 +141,6 @@ theme_version_of() {
 install_theme() {
     cp "${THEME_SRC}" "${THEME_DST}"
     bashio::log.info "  ${1} broadsheet HA theme → ${THEME_DST}"
-    # Reload HA's themes so the change lands without an HA restart.
-    # homeassistant_api: true grants us the supervisor → core proxy.
     if curl -fsS -m 10 -X POST \
         -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" \
         -H "Content-Type: application/json" \
@@ -212,32 +170,54 @@ else
     bashio::log.notice "Couldn't reach ${HA_THEMES_DIR} — skipping theme install (is homeassistant_config mapped?)"
 fi
 
-# ── 5d. Apply or revert sidebar takeover ────────────────────────────
-# Runs against HA's WS API (via supervisor proxy) — writes per-user
-# frontend.user_data so HA's sidebar collapses globally + broadsheet
-# becomes the landing surface for every HA user. Idempotent — repeats
-# on every boot so new HA accounts get fixed up at next addon restart.
-# Failures here are logged but do NOT abort the boot — broadsheet
-# still works as a peer frontend if the takeover write fails.
-# See init/sidebar.py + docs/plans/plan-sidebar-takeover.md.
-if [ -f /usr/share/broadsheet/init/sidebar.py ]; then
-    if python3 /usr/share/broadsheet/init/sidebar.py "${SIDEBAR_TAKEOVER}" 2>&1; then
-        bashio::log.info "  sidebar takeover (${SIDEBAR_TAKEOVER}): applied"
-    else
-        bashio::log.notice "  sidebar takeover (${SIDEBAR_TAKEOVER}): partial or failed — continuing as peer frontend"
-    fi
+# ── 7. Install the Lovelace launcher JS ─────────────────────────────
+# This file is loaded by HA's Lovelace frontend (as a registered
+# resource) and defines `<broadsheet-launcher-card>` — a redirect
+# element that sends the browser to broadsheet's URL on render.
+#
+# The version-suffix in the filename gives us cache-bust on upgrade
+# without playing with Cache-Control headers (HA aggressively caches
+# /local/ assets). register-launcher.py registers /local/broadsheet-
+# launcher.v<VERSION>.js as a Lovelace resource and cleans up older
+# versions on upgrade.
+#
+# The launcher template uses @@PORT@@ as a placeholder for the addon's
+# host-port-override. sed substitutes it at install time.
+HA_WWW_DIR="/homeassistant/www"
+LAUNCHER_SRC="/usr/share/broadsheet/launcher-template.js"
+LAUNCHER_VER="$(echo "${ADDON_VERSION}" | tr '.' '_')"
+LAUNCHER_DST="${HA_WWW_DIR}/broadsheet-launcher.v${LAUNCHER_VER}.js"
+
+if [ -f "${LAUNCHER_SRC}" ] && mkdir -p "${HA_WWW_DIR}" 2>/dev/null; then
+    sed "s|@@PORT@@|${HOST_PORT}|g" "${LAUNCHER_SRC}" > "${LAUNCHER_DST}"
+    bashio::log.info "  Installed Lovelace launcher → ${LAUNCHER_DST}"
+
+    # Clean up stale launcher files from previous addon versions
+    for f in "${HA_WWW_DIR}"/broadsheet-launcher.v*.js; do
+        if [ -f "$f" ] && [ "$f" != "${LAUNCHER_DST}" ]; then
+            rm "$f" && bashio::log.info "  Removed stale launcher: $f"
+        fi
+    done
 else
-    bashio::log.warning "  sidebar takeover script missing — old image? skipping"
+    bashio::log.notice "Couldn't reach ${HA_WWW_DIR} — skipping launcher install (is homeassistant_config mapped?)"
 fi
 
-# ── 5c. Ensure plugin-data root exists ──────────────────────────────
-# User-uploaded plugin assets land under /data/plugin-data/<id>/. /data
-# is the addon's persistent volume so files survive add-on updates.
-# Plugins write via the sidecar's POST /api/broadsheet/plugin-data/<id>;
-# nginx serves at /plugin-data/<id>/<filename>. mkdir is idempotent.
+# ── 7b. Ensure plugin-data root exists ──────────────────────────────
 mkdir -p /data/plugin-data
 
-# ── 6. Start sidecar (curation API on localhost) ────────────────────
+# ── 8. Register the Lovelace launcher (sidebar entry) ───────────────
+# Runs in background — register-launcher.py retries up to 60s if HA
+# Core is still booting, so we don't want to block nginx startup on
+# this. The sidebar entry appears as soon as HA + WS-API are ready;
+# the SPA itself is reachable via direct URL the instant nginx starts.
+bashio::log.info "Registering Lovelace launcher dashboard (background)..."
+(
+    export BROADSHEET_VERSION="${LAUNCHER_VER}"
+    python3 /usr/share/broadsheet/init/register-launcher.py install \
+        --version "${LAUNCHER_VER}" 2>&1
+) &
+
+# ── 9. Start sidecar (curation API on localhost) ────────────────────
 bashio::log.info "Starting sidecar (curation + plugin-data API on localhost:8100)..."
 python3 /usr/share/broadsheet/sidecar.py \
     --curation-path "${CURATION_PATH}" \
@@ -245,18 +225,17 @@ python3 /usr/share/broadsheet/sidecar.py \
     --bind 127.0.0.1:8100 &
 SIDECAR_PID=$!
 
-# ── Shutdown cleanup ────────────────────────────────────────────────
+# ── 11. Shutdown cleanup ────────────────────────────────────────────
 # HA addon spec only gives us SIGTERM to the container before
 # destruction — there's no distinction between "you're being
 # uninstalled" and "you're being restarted/updated". So we ALWAYS
-# revert side-effects we've written into HA core's state on stop:
+# deregister the launcher on stop:
 #
-#   - HA user_data (defaultPanel + dockedSidebar) reverted via
-#     init/sidebar.py with mode='off'. Idempotent — no-op if takeover
-#     wasn't applied this boot. If this stop is just a restart, the
-#     next boot re-applies within ~5s (brief sidebar flash, single
-#     re-render cycle). If this stop is an uninstall, HA core is left
-#     in a clean state with no dangling broadsheet panel pointer.
+#   - register-launcher.py uninstall removes the Lovelace dashboard
+#     entry + the registered resource. Idempotent. If this is a
+#     restart (not an uninstall), the next addon boot re-registers
+#     within ~5s. Brief sidebar-entry flicker on restart vs an
+#     orphaned dashboard on uninstall is the right trade.
 #
 # We do NOT auto-remove the broadsheet HA theme on stop (only-if-our-
 # marker logic is install-time only; preserves user-edited copies and
@@ -264,18 +243,14 @@ SIDECAR_PID=$!
 # harold-preset meeting-mode blueprint in place — the harold-preset
 # settings panel has an explicit "Remove blueprint" affordance for
 # users who want it gone before uninstall.
-#
-# Future: HA addon spec may add an explicit pre-uninstall hook that
-# lets us tell stop-vs-uninstall apart and do tighter cleanup. Until
-# then, "always revert on stop" is the right trade-off.
 cleanup() {
     bashio::log.info 'Shutting down...'
-    if [ -f /usr/share/broadsheet/init/sidebar.py ]; then
-        bashio::log.info '  Reverting sidebar takeover (best-effort)...'
-        if python3 /usr/share/broadsheet/init/sidebar.py off 2>&1; then
-            bashio::log.info '  Sidebar takeover reverted'
+    if [ -f /usr/share/broadsheet/init/register-launcher.py ]; then
+        bashio::log.info '  Deregistering Lovelace launcher (best-effort)...'
+        if python3 /usr/share/broadsheet/init/register-launcher.py uninstall 2>&1; then
+            bashio::log.info '  Launcher deregistered'
         else
-            bashio::log.warning '  Sidebar revert failed — users can fix via Profile UI'
+            bashio::log.warning '  Launcher deregister failed — sidebar entry may persist; users can remove via Settings → Dashboards'
         fi
     fi
     kill ${SIDECAR_PID} 2>/dev/null
@@ -283,6 +258,6 @@ cleanup() {
 }
 trap cleanup SIGTERM SIGINT
 
-# ── 7. Start nginx in the foreground ────────────────────────────────
-bashio::log.info "broadsheet ready at ingress entry ${INGRESS_ENTRY}"
+# ── 10. Start nginx in the foreground ───────────────────────────────
+bashio::log.info "broadsheet ready at http://<host>:${HOST_PORT}/"
 exec nginx -g "daemon off;"
