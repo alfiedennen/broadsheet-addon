@@ -73,9 +73,13 @@ def launcher_url(version: str) -> str:
 LAUNCHER_URL_PREFIX = "/local/broadsheet-launcher."
 
 # The dashboard we register. url_path is the URL slug HA uses in
-# the sidebar (e.g. /broadsheet). title shows in the sidebar.
+# the sidebar (e.g. /broadsheet-app). HA's lovelace validator rejects
+# single-word slugs with "Url path needs to contain a hyphen (-)" —
+# so 'broadsheet' alone fails. 'broadsheet-app' satisfies the hyphen
+# requirement + reads naturally in the URL bar. title shows in the
+# sidebar.
 DASHBOARD = {
-    "url_path": "broadsheet",
+    "url_path": "broadsheet-app",
     "title": "Broadsheet",
     "icon": "mdi:newspaper-variant",
     "show_in_sidebar": True,
