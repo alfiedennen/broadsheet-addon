@@ -159,6 +159,17 @@ http {
             proxy_set_header X-Real-IP $remote_addr;
         }
 
+        # ── Harold preset API — sidecar serves bundled wakeword
+        # artefacts + meeting-mode blueprint install/uninstall. Same
+        # sidecar, different path prefix. Routes registered in
+        # sidecar.py under /harold-preset/* (nginx strips the /api/
+        # prefix via the trailing slash convention).
+        location /api/harold-preset/ {
+            proxy_pass http://127.0.0.1:8100/harold-preset/;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+        }
+
         # ── HA Core API + WebSocket via Supervisor ──
         # The crucial trick: SUPERVISOR_TOKEN is auto-injected as an
         # env var by HA. We expose it via the Authorization header on

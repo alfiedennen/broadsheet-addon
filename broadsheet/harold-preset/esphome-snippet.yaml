@@ -1,0 +1,47 @@
+# Hey Harold wake-word — ESPHome snippet
+#
+# Drop this into your ESPHome project's YAML for any Atom Echo /
+# Wyoming-protocol satellite that should listen for "Hey Harold".
+#
+# Prerequisites:
+#   1. Place the `hey_harold.tflite` + `hey_harold.json` files
+#      (download both from broadsheet → Settings → Plugins →
+#      Harold → Hey Harold wake-word) into your ESPHome project's
+#      `wakewords/hey_harold/` directory:
+#
+#        config/esphome/wakewords/hey_harold/hey_harold.tflite
+#        config/esphome/wakewords/hey_harold/hey_harold.json
+#
+#   2. Add this block to the satellite's YAML (replacing any
+#      existing `micro_wake_word:` block). Compile + flash.
+#
+# Notes:
+#   - Threshold + sliding-window values are tuned for typical
+#     office/kitchen ambient noise. If you get false-fires turn
+#     `probability_cutoff` up (toward 0.95); if it misses real
+#     "hey harold" turn it down (toward 0.7).
+#   - tensor_arena_size: 50000 is required — the default (30000)
+#     is too small for the v3 model and silently fails to load.
+#   - This is a local on-device model: no cloud round-trip, no
+#     external API. Runs in ~30ms per audio buffer on ESP32-S3.
+#   - The model was trained primarily on a British male voice
+#     (Alfred Hitchcock-ish baseline). It works for most English
+#     speakers; non-English-as-first-language speakers may need
+#     a community-retrained variant (planned v0.2).
+#
+# License: MIT (model and config snippet). See
+# packages/harold-preset/LICENSE in the broadsheet repo.
+
+micro_wake_word:
+  on_wake_word_detected:
+    - voice_assistant.start:
+        wake_word: !lambda return wake_word;
+  models:
+    - model: hey_harold
+      probability_cutoff: 0.85
+      sliding_window_size: 5
+      tensor_arena_size: 50000
+
+# After flashing, in Home Assistant:
+#   Settings → Voice assistants → Expose → enable this satellite
+#   for the pipeline that broadsheet's voice substrate is using.

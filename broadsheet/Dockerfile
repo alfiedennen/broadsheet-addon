@@ -31,6 +31,13 @@ COPY init/ /usr/share/broadsheet/init/
 # /homeassistant/themes/ on first boot (never overwriting).
 COPY theme/ /usr/share/broadsheet/theme/
 
+# Harold preset bundled artefacts — the .tflite wake-word model, the
+# matching JSON config, the ESPHome snippet template, and the
+# meeting-mode HA blueprint. Served via the sidecar's
+# /api/harold-preset/* routes when the @broadsheet/harold-preset
+# plugin is enabled. See docs/plans/plan-harold-preset.md.
+COPY harold-preset/ /usr/share/broadsheet/harold-preset/
+
 # Copy the prebuilt SPA bundle (rebuilt every CI run, hence last)
 # `www/` is populated by GitHub Actions before the docker build —
 # the broadsheet/core repo is checked out, pnpm build, copied here.

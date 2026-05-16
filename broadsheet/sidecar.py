@@ -283,6 +283,95 @@ async def health(request: web.Request) -> web.Response:
     )
 
 
+# ── Harold preset endpoints ─────────────────────────────────────────
+#
+# `/api/harold-preset/*` is served by the SPA-side @broadsheet/harold-preset
+# plugin via these sidecar routes. The plugin can't reach HA's filesystem
+# from the browser; the sidecar can (homeassistant_config:rw mount gives
+# it /homeassistant/blueprints/), so any blueprint install / wakeword
+# download / etc has to come through here.
+
+# Bundled artefacts live at /usr/share/broadsheet/harold-preset/ (baked
+# into the addon image at build time). On install the SPA hits these
+# routes to GET the wakeword OR POST to install the blueprint.
+HAROLD_PRESET_ROOT = Path('/usr/share/broadsheet/harold-preset')
+HA_BLUEPRINTS_DIR = Path('/homeassistant/blueprints/automation/broadsheet')
+MEETING_MODE_BLUEPRINT_DST = HA_BLUEPRINTS_DIR / 'meeting-mode.yaml'
+
+
+async def harold_wakeword(request: web.Request) -> web.StreamResponse:
+    """Serve a bundled wake-word artefact (`hey_harold.tflite`,
+    `hey_harold.json`, `esphome-snippet.yaml`).
+    """
+    filename = request.match_info.get('filename', '')
+    # Strict allowlist — don't let arbitrary paths escape via ..
+    allowed = {
+        'hey_harold.tflite',
+        'hey_harold.json',
+        'esphome-snippet.yaml',
+    }
+    if filename not in allowed:
+        return web.json_response({'error': 'not found'}, status=404)
+    path = HAROLD_PRESET_ROOT / filename
+    if not path.exists():
+        return web.json_response(
+            {
+                'error': 'artefact missing in addon image',
+                'path': str(path),
+                'hint': 'old addon version? Update broadsheet add-on to a build that includes harold-preset bundles.',
+            },
+            status=404,
+        )
+    return web.FileResponse(path)
+
+
+async def install_blueprint(request: web.Request) -> web.Response:
+    """Copy meeting-mode.blueprint.yaml into HA's blueprints/ tree."""
+    src = HAROLD_PRESET_ROOT / 'meeting-mode.blueprint.yaml'
+    if not src.exists():
+        return web.json_response(
+            {
+                'error': 'blueprint source missing in addon image',
+                'src': str(src),
+            },
+            status=500,
+        )
+    try:
+        HA_BLUEPRINTS_DIR.mkdir(parents=True, exist_ok=True)
+        MEETING_MODE_BLUEPRINT_DST.write_bytes(src.read_bytes())
+        log.info('installed blueprint: %s', MEETING_MODE_BLUEPRINT_DST)
+        return web.json_response(
+            {
+                'ok': True,
+                'installed_at': str(MEETING_MODE_BLUEPRINT_DST),
+            }
+        )
+    except OSError as e:
+        log.exception('blueprint install failed')
+        return web.json_response(
+            {
+                'error': 'install failed',
+                'detail': str(e),
+                'hint': 'is homeassistant_config:rw mapped in the addon config? It should be.',
+            },
+            status=500,
+        )
+
+
+async def uninstall_blueprint(request: web.Request) -> web.Response:
+    """Remove the meeting-mode blueprint. Idempotent — already-gone = success."""
+    try:
+        if MEETING_MODE_BLUEPRINT_DST.exists():
+            MEETING_MODE_BLUEPRINT_DST.unlink()
+            log.info('removed blueprint: %s', MEETING_MODE_BLUEPRINT_DST)
+        return web.json_response({'ok': True})
+    except OSError as e:
+        log.exception('blueprint uninstall failed')
+        return web.json_response(
+            {'error': 'uninstall failed', 'detail': str(e)}, status=500
+        )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description='broadsheet curation sidecar')
     parser.add_argument(
@@ -314,6 +403,12 @@ def main() -> None:
     app.router.add_post('/plugin-data/{plugin_id}', upload_plugin_data)
     app.router.add_delete('/plugin-data/{plugin_id}/{filename}', delete_plugin_data)
     app.router.add_get('/health', health)
+    # Harold preset (@broadsheet/harold-preset plugin) — wakeword
+    # downloads + meeting-mode blueprint auto-install. Mounted under
+    # /harold-preset/* — nginx prefixes /api/ when routing from the SPA.
+    app.router.add_get('/harold-preset/wakeword/{filename}', harold_wakeword)
+    app.router.add_post('/harold-preset/blueprint/install', install_blueprint)
+    app.router.add_delete('/harold-preset/blueprint/install', uninstall_blueprint)
 
     host, port = args.bind.split(':')
     log.info('starting on %s, curation file: %s', args.bind, args.curation_path)

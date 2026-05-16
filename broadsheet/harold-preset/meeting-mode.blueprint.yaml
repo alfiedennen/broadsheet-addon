@@ -1,0 +1,85 @@
+blueprint:
+  name: Harold meeting-mode hard-mute
+  description: >
+    Silence Harold's TTS on a designated office speaker while
+    `input_boolean.meeting_mode` is on. Three-layer enforcement:
+    intent-side gate (already in voice substrate), TTS service gate
+    (covered by broadsheet), and speaker-volume-0 (this blueprint).
+
+
+    Installed by broadsheet's @broadsheet/harold-preset plugin via
+    Settings → Plugins → Harold → "Install blueprint". Removable
+    from the same panel. Stored at
+    /homeassistant/blueprints/automation/broadsheet/meeting-mode.yaml.
+
+
+    The blueprint creates ONE automation that watches the
+    meeting-mode boolean and writes volume=0 to your office speaker
+    when it flips on, restoring a saved volume when it flips off.
+    Belt-and-braces — even if a future code path bypasses broadsheet's
+    own TTS gate, the speaker has no audio to play.
+
+  domain: automation
+
+  input:
+    meeting_boolean:
+      name: Meeting-mode input_boolean
+      description: >
+        The input_boolean.* whose state drives the mute.
+      selector:
+        entity:
+          domain: input_boolean
+
+    office_speaker:
+      name: Office speaker (media_player)
+      description: >
+        The media_player.* to silence. Usually the speaker physically
+        nearest where you take calls.
+      selector:
+        entity:
+          domain: media_player
+
+    restore_volume:
+      name: Volume to restore when meeting-mode ends
+      description: 0.0–1.0. Default 0.7.
+      default: 0.7
+      selector:
+        number:
+          min: 0
+          max: 1
+          step: 0.05
+
+mode: parallel
+
+trigger:
+  - platform: state
+    entity_id: !input meeting_boolean
+    from: 'off'
+    to: 'on'
+    id: meeting-on
+  - platform: state
+    entity_id: !input meeting_boolean
+    from: 'on'
+    to: 'off'
+    id: meeting-off
+
+action:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: meeting-on
+        sequence:
+          - service: media_player.volume_set
+            target:
+              entity_id: !input office_speaker
+            data:
+              volume_level: 0
+      - conditions:
+          - condition: trigger
+            id: meeting-off
+        sequence:
+          - service: media_player.volume_set
+            target:
+              entity_id: !input office_speaker
+            data:
+              volume_level: !input restore_volume
