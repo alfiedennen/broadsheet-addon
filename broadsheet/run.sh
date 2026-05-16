@@ -245,8 +245,43 @@ python3 /usr/share/broadsheet/sidecar.py \
     --bind 127.0.0.1:8100 &
 SIDECAR_PID=$!
 
-# Trap shutdown so the sidecar exits cleanly with nginx
-trap "bashio::log.info 'Shutting down...'; kill ${SIDECAR_PID} 2>/dev/null; exit 0" SIGTERM SIGINT
+# ── Shutdown cleanup ────────────────────────────────────────────────
+# HA addon spec only gives us SIGTERM to the container before
+# destruction — there's no distinction between "you're being
+# uninstalled" and "you're being restarted/updated". So we ALWAYS
+# revert side-effects we've written into HA core's state on stop:
+#
+#   - HA user_data (defaultPanel + dockedSidebar) reverted via
+#     init/sidebar.py with mode='off'. Idempotent — no-op if takeover
+#     wasn't applied this boot. If this stop is just a restart, the
+#     next boot re-applies within ~5s (brief sidebar flash, single
+#     re-render cycle). If this stop is an uninstall, HA core is left
+#     in a clean state with no dangling broadsheet panel pointer.
+#
+# We do NOT auto-remove the broadsheet HA theme on stop (only-if-our-
+# marker logic is install-time only; preserves user-edited copies and
+# keeps the theme available across restarts). Likewise we leave the
+# harold-preset meeting-mode blueprint in place — the harold-preset
+# settings panel has an explicit "Remove blueprint" affordance for
+# users who want it gone before uninstall.
+#
+# Future: HA addon spec may add an explicit pre-uninstall hook that
+# lets us tell stop-vs-uninstall apart and do tighter cleanup. Until
+# then, "always revert on stop" is the right trade-off.
+cleanup() {
+    bashio::log.info 'Shutting down...'
+    if [ -f /usr/share/broadsheet/init/sidebar.py ]; then
+        bashio::log.info '  Reverting sidebar takeover (best-effort)...'
+        if python3 /usr/share/broadsheet/init/sidebar.py off 2>&1; then
+            bashio::log.info '  Sidebar takeover reverted'
+        else
+            bashio::log.warning '  Sidebar revert failed — users can fix via Profile UI'
+        fi
+    fi
+    kill ${SIDECAR_PID} 2>/dev/null
+    exit 0
+}
+trap cleanup SIGTERM SIGINT
 
 # ── 7. Start nginx in the foreground ────────────────────────────────
 bashio::log.info "broadsheet ready at ingress entry ${INGRESS_ENTRY}"
