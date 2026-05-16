@@ -39,7 +39,11 @@ http {
     # rewriting, the browser requests `/_app/...` from origin root (HA frontend),
     # gets 404s for every chunk, and the SPA never boots.
     sub_filter_once off;
-    sub_filter_types text/html application/javascript text/css;
+    # text/html is implicit (nginx's default sub_filter_types value);
+    # listing it explicitly triggers a "duplicate MIME type" warning at
+    # boot. We only need to ADD application/javascript + text/css so the
+    # rewriter sees module preload paths in JS chunks + CSS asset URLs.
+    sub_filter_types application/javascript text/css;
 
     server {
         listen {{ env "INGRESS_PORT" }} default_server;

@@ -29,12 +29,23 @@ if bashio::config.true 'read_only'; then
 else
     READ_ONLY="false"
 fi
+# sidebar_takeover: true (default) = on each boot, collapse HA's
+# sidebar globally + make broadsheet the default landing surface for
+# every HA user. See init/sidebar.py for the per-user WS writes. Set
+# false to keep HA's sidebar in place + run broadsheet as a peer
+# frontend. Roll-back is one toggle + addon restart.
+if bashio::config.true 'sidebar_takeover'; then
+    SIDEBAR_TAKEOVER="on"
+else
+    SIDEBAR_TAKEOVER="off"
+fi
 
 bashio::log.level "${LOG_LEVEL}"
 bashio::log.info "broadsheet starting up..."
 bashio::log.info "  curation: ${CURATION_PATH}"
 bashio::log.info "  region:   ${REGION}"
 bashio::log.info "  read_only: ${READ_ONLY}"
+bashio::log.info "  sidebar_takeover: ${SIDEBAR_TAKEOVER}"
 
 # ── 2. Ensure curation directory + default file exists ──────────────
 mkdir -p "$(dirname "${CURATION_PATH}")"
@@ -88,6 +99,12 @@ fi
 # mode + get the credentials. Written fresh on every container boot
 # so the SUPERVISOR_TOKEN is always current (it rotates).
 mkdir -p /usr/share/broadsheet/www
+# Normalise sidebar_takeover for the runtime env — true if option is
+# enabled, false otherwise. The SPA's TakeoverBanner reads this to
+# decide whether to show the first-launch advisory; without the
+# gate, the banner would appear even after the user has rolled back
+# the takeover with `sidebar_takeover: false`.
+SIDEBAR_TAKEOVER_JS=$([ "${SIDEBAR_TAKEOVER}" = "on" ] && echo "true" || echo "false")
 cat > /usr/share/broadsheet/www/runtime-env.js <<EOF
 // Injected by run.sh on every container boot.
 // SUPERVISOR_TOKEN rotates per container lifetime; this file is
@@ -105,7 +122,11 @@ window.__BROADSHEET_ENV__ = {
   // The add-on is the user's dashboard — writable by default. The SPA
   // reads this; true makes it a read-only viewer (lock.* hard-banned
   // either way). Bare word, not a string — it's a JS boolean.
-  readOnly: ${READ_ONLY}
+  readOnly: ${READ_ONLY},
+  // Whether the addon's HA frontend takeover is currently ACTIVE.
+  // The SPA's TakeoverBanner gates on this — only shows the
+  // first-launch advisory if takeover actually happened. Boolean.
+  sidebarTakeover: ${SIDEBAR_TAKEOVER_JS}
 };
 EOF
 
@@ -189,6 +210,24 @@ if [ -f "${THEME_SRC}" ] && mkdir -p "${HA_THEMES_DIR}" 2>/dev/null; then
     fi
 else
     bashio::log.notice "Couldn't reach ${HA_THEMES_DIR} — skipping theme install (is homeassistant_config mapped?)"
+fi
+
+# ── 5d. Apply or revert sidebar takeover ────────────────────────────
+# Runs against HA's WS API (via supervisor proxy) — writes per-user
+# frontend.user_data so HA's sidebar collapses globally + broadsheet
+# becomes the landing surface for every HA user. Idempotent — repeats
+# on every boot so new HA accounts get fixed up at next addon restart.
+# Failures here are logged but do NOT abort the boot — broadsheet
+# still works as a peer frontend if the takeover write fails.
+# See init/sidebar.py + docs/plans/plan-sidebar-takeover.md.
+if [ -f /usr/share/broadsheet/init/sidebar.py ]; then
+    if python3 /usr/share/broadsheet/init/sidebar.py "${SIDEBAR_TAKEOVER}" 2>&1; then
+        bashio::log.info "  sidebar takeover (${SIDEBAR_TAKEOVER}): applied"
+    else
+        bashio::log.notice "  sidebar takeover (${SIDEBAR_TAKEOVER}): partial or failed — continuing as peer frontend"
+    fi
+else
+    bashio::log.warning "  sidebar takeover script missing — old image? skipping"
 fi
 
 # ── 5c. Ensure plugin-data root exists ──────────────────────────────

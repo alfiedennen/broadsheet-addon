@@ -20,6 +20,13 @@ COPY run.sh /etc/services.d/broadsheet/run
 COPY nginx.conf.tpl /etc/nginx/nginx.conf.tpl
 COPY sidecar.py /usr/share/broadsheet/sidecar.py
 
+# Init scripts run by run.sh BEFORE nginx starts. sidebar.py applies
+# (or reverts) the HA frontend takeover — writes per-user user_data
+# so HA's sidebar collapses + broadsheet becomes the default landing
+# surface. Idempotent + runs every boot. See
+# docs/plans/plan-sidebar-takeover.md for the design.
+COPY init/ /usr/share/broadsheet/init/
+
 # The broadsheet HA theme — run.sh drops this into the user's
 # /homeassistant/themes/ on first boot (never overwriting).
 COPY theme/ /usr/share/broadsheet/theme/
