@@ -32,6 +32,25 @@ Eight pages that adapt to whatever your HA install already has:
   people. With smart auto-hide for system noise + duplicates +
   iBeacon environmental advertisements.
 
+Plus the **things-first custom page builder** (added 0.9.1+) at
+**Settings → Pages → + New page**. Browse the controllable things
+in your house — grouped by room then by Lights / TV / Heating / …
+— and tap or drag to add them to a wall surface. Composed recipes
+("Living Room lights — panel", "Living Room media — panel") drop
+single composite blocks; one-tap macros across N entities; plugins
+contribute their own blocks (TMDB rows next to a TV remote when
+`@broadsheet/tmdb-tv` is enabled).
+
+For wall tablets, pick a **Wall device** preset (Fire HD 10,
+Galaxy Tab A9, iPad, Pixel Tablet, etc.) in page meta — the editor
+previews at the device's native dimensions + offers a copyable
+**Kiosk URL** with Fully Kiosk Browser hints.
+
+Full walkthrough:
+[WALL-BUILDER-GUIDE](https://github.com/alfiedennen/broadsheet/blob/main/docs/WALL-BUILDER-GUIDE.md)
++
+[CUSTOM-PAGES-GUIDE](https://github.com/alfiedennen/broadsheet/blob/main/docs/CUSTOM-PAGES-GUIDE.md).
+
 ## Configuration
 
 | Option | Default | Notes |
