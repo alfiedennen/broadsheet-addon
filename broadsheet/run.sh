@@ -29,7 +29,7 @@ set -e
 # we read from the runtime-injected env (HA supervisor sets ADDON_VERSION
 # in some contexts but not reliably) so fall back to config.yaml's
 # hardcoded version baked into image at build time.
-ADDON_VERSION="${ADDON_VERSION:-0.3.2}"
+ADDON_VERSION="${ADDON_VERSION:-0.4.0}"
 
 # ── 1. Read add-on options ──────────────────────────────────────────
 LOG_LEVEL=$(bashio::config 'log_level')
