@@ -133,6 +133,66 @@ http {
             proxy_set_header Host $host;
         }
 
+        # ── 0.9.4.3: lovelace-embed proxy + auxiliary HA-asset routes ──
+        #
+        # broadsheet's `lovelace-embed` block iframes an HA Lovelace
+        # URL. HA serves `X-Frame-Options: SAMEORIGIN` which blocks the
+        # cross-origin frame (broadsheet at :8124, HA at :8123). The
+        # /embed/ route below proxies the request server-side (we're
+        # same-origin with HA via supervisor network) and STRIPS
+        # X-Frame-Options on the response so the browser allows the
+        # frame. Also strips Content-Security-Policy (HA's CSP
+        # includes frame-ancestors restrictions that would also block).
+        #
+        # The auxiliary routes (/static, /frontend_latest, /auth,
+        # /manifest.json, /service_worker.js) are the paths HA's
+        # Lovelace frontend hits at the root level for its own assets.
+        # Without them, the iframe loads but the JS/CSS inside fails
+        # to fetch (same-origin to broadsheet, but those paths only
+        # exist on HA). /api/ + /api/websocket already proxy above.
+        #
+        # Auth via Supervisor token — embedded Lovelace renders as
+        # the supervisor user (admin). Fine for the wall-tablet use
+        # case; documented in CUSTOM-PAGES-GUIDE.md.
+        location ~ ^/embed/(.*)$ {
+            proxy_pass http://supervisor/core/$1$is_args$args;
+            proxy_set_header Authorization "Bearer {{ env "SUPERVISOR_TOKEN" }}";
+            proxy_set_header Host $host;
+            proxy_hide_header X-Frame-Options;
+            proxy_hide_header Content-Security-Policy;
+            proxy_http_version 1.1;
+            proxy_read_timeout 86400;
+            proxy_buffering off;
+        }
+        location /static/ {
+            proxy_pass http://supervisor/core/static/;
+            proxy_set_header Authorization "Bearer {{ env "SUPERVISOR_TOKEN" }}";
+            proxy_set_header Host $host;
+            proxy_hide_header X-Frame-Options;
+        }
+        location /frontend_latest/ {
+            proxy_pass http://supervisor/core/frontend_latest/;
+            proxy_set_header Authorization "Bearer {{ env "SUPERVISOR_TOKEN" }}";
+            proxy_set_header Host $host;
+            proxy_hide_header X-Frame-Options;
+        }
+        location /auth/ {
+            proxy_pass http://supervisor/core/auth/;
+            proxy_set_header Authorization "Bearer {{ env "SUPERVISOR_TOKEN" }}";
+            proxy_set_header Host $host;
+            proxy_hide_header X-Frame-Options;
+        }
+        location = /manifest.json {
+            proxy_pass http://supervisor/core/manifest.json;
+            proxy_set_header Authorization "Bearer {{ env "SUPERVISOR_TOKEN" }}";
+            proxy_set_header Host $host;
+        }
+        location = /service_worker.js {
+            proxy_pass http://supervisor/core/service_worker.js;
+            proxy_set_header Authorization "Bearer {{ env "SUPERVISOR_TOKEN" }}";
+            proxy_set_header Host $host;
+        }
+
         # ── SPA fallback ──
         # In v0.1 we needed sub_filter rewrites here to inject the
         # ingress URL prefix into every asset path. v0.2 doesn't go
