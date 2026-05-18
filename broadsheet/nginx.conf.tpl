@@ -173,11 +173,52 @@ http {
         location ~ ^/embed/(.*)$ {
             proxy_pass http://homeassistant:8123/$1$is_args$args;
             proxy_set_header Host $host;
+            # Force upstream to send uncompressed responses — sub_filter
+            # (0.9.4.6) needs to see body bytes as plain text to rewrite
+            # them. HA otherwise gzips text/html based on Accept-Encoding.
+            proxy_set_header Accept-Encoding "";
             proxy_hide_header X-Frame-Options;
             proxy_hide_header Content-Security-Policy;
             proxy_http_version 1.1;
             proxy_read_timeout 86400;
-            proxy_buffering off;
+            # NB: proxy_buffering was `off` in 0.9.4.4/5 — removed in
+            # 0.9.4.6 because sub_filter requires buffered responses
+            # (nginx can't rewrite a body it's streaming through).
+            # HA's frontend HTML is small (~30 KB) so buffering is fine.
+
+            # ── 0.9.4.6: chrome-hide + URL-prefix strip injections ──
+            #
+            # Two body rewrites injected at the top of HA's <head>:
+            #
+            # 1. A synchronous classic <script> that runs BEFORE HA's
+            #    frontend boot scripts. It strips the `/embed/` prefix
+            #    from the iframe's URL via history.replaceState. HA's
+            #    router then reads the URL as `/wall-tablet?kiosk=true`
+            #    instead of `/embed/wall-tablet?kiosk=true` and
+            #    resolves the right dashboard. Without this strip,
+            #    HA falls back to Overview because "embed" isn't a
+            #    known dashboard slug.
+            #
+            #    Known limit: if the user navigates within the iframe
+            #    (e.g. taps an HA view tab), HA pushState's the new URL
+            #    without the `/embed/` prefix. Refreshing then sends
+            #    the browser to `/wall-tablet/<view>` directly, which
+            #    hits broadsheet's catch-all SPA fallback and shows
+            #    broadsheet's homepage inside the iframe. Documented
+            #    in TROUBLESHOOTING. Users navigate at the broadsheet
+            #    level (parent page nav) rather than within the iframe.
+            #
+            # 2. A <style> block that hides HA's chrome unconditionally
+            #    (sidebar + header + view-tab bar), regardless of
+            #    whether the dashboard opted into the kiosk-mode HACS
+            #    plugin. Works by hiding the LIGHT DOM host elements
+            #    (display:none on <ha-sidebar>, <app-header>, etc).
+            #    Shadow DOM internals are unreachable from a document-
+            #    level <style> but that's fine — hiding the host
+            #    removes the whole tree.
+            sub_filter_once on;
+            sub_filter_types text/html;
+            sub_filter '<head>' '<head><script>(function(){try{var p=location.pathname;if(p.indexOf("/embed/")===0){history.replaceState(null,"",p.replace(/^\/embed\//,"/")+location.search+location.hash);}}catch(e){}})();</script><style id="broadsheet-embed-chrome-hide">ha-sidebar,app-header-layout app-header,ha-app-layout app-header,ha-panel-lovelace app-header,paper-tabs.toolbar,.header-bar,mwc-top-app-bar-fixed,ha-top-app-bar-fixed{display:none!important}ha-app-layout app-main,ha-app-layout main,ha-panel-lovelace>div,#view{padding-top:0!important;margin-top:0!important}ha-drawer{--mdc-drawer-width:0!important}partial-panel-resolver,home-assistant-main{margin-left:0!important}</style>';
         }
         location ^~ /static/ {
             proxy_pass http://homeassistant:8123/static/;
