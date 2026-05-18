@@ -133,7 +133,7 @@ http {
             proxy_set_header Host $host;
         }
 
-        # ── 0.9.4.3: lovelace-embed proxy + auxiliary HA-asset routes ──
+        # ── 0.9.4.4: lovelace-embed proxy + auxiliary HA-asset routes ──
         #
         # broadsheet's `lovelace-embed` block iframes an HA Lovelace
         # URL. HA serves `X-Frame-Options: SAMEORIGIN` which blocks the
@@ -151,12 +151,16 @@ http {
         # to fetch (same-origin to broadsheet, but those paths only
         # exist on HA). /api/ + /api/websocket already proxy above.
         #
-        # Auth via Supervisor token — embedded Lovelace renders as
-        # the supervisor user (admin). Fine for the wall-tablet use
-        # case; documented in CUSTOM-PAGES-GUIDE.md.
+        # 0.9.4.4 fix: use `homeassistant:8123` (Supervisor's DNS
+        # name for HA Core's frontend port) instead of
+        # `supervisor/core/...`. The Supervisor `/core/` proxy only
+        # serves REST API paths — frontend paths return 403. Frontend
+        # pages don't need auth (HA returns them; auth is cookie/
+        # localStorage-based at the browser); the existing /api/
+        # routes still inject the Supervisor token for REST + WS
+        # calls the embedded Lovelace makes after page load.
         location ~ ^/embed/(.*)$ {
-            proxy_pass http://supervisor/core/$1$is_args$args;
-            proxy_set_header Authorization "Bearer {{ env "SUPERVISOR_TOKEN" }}";
+            proxy_pass http://homeassistant:8123/$1$is_args$args;
             proxy_set_header Host $host;
             proxy_hide_header X-Frame-Options;
             proxy_hide_header Content-Security-Policy;
@@ -165,31 +169,26 @@ http {
             proxy_buffering off;
         }
         location /static/ {
-            proxy_pass http://supervisor/core/static/;
-            proxy_set_header Authorization "Bearer {{ env "SUPERVISOR_TOKEN" }}";
+            proxy_pass http://homeassistant:8123/static/;
             proxy_set_header Host $host;
             proxy_hide_header X-Frame-Options;
         }
         location /frontend_latest/ {
-            proxy_pass http://supervisor/core/frontend_latest/;
-            proxy_set_header Authorization "Bearer {{ env "SUPERVISOR_TOKEN" }}";
+            proxy_pass http://homeassistant:8123/frontend_latest/;
             proxy_set_header Host $host;
             proxy_hide_header X-Frame-Options;
         }
         location /auth/ {
-            proxy_pass http://supervisor/core/auth/;
-            proxy_set_header Authorization "Bearer {{ env "SUPERVISOR_TOKEN" }}";
+            proxy_pass http://homeassistant:8123/auth/;
             proxy_set_header Host $host;
             proxy_hide_header X-Frame-Options;
         }
         location = /manifest.json {
-            proxy_pass http://supervisor/core/manifest.json;
-            proxy_set_header Authorization "Bearer {{ env "SUPERVISOR_TOKEN" }}";
+            proxy_pass http://homeassistant:8123/manifest.json;
             proxy_set_header Host $host;
         }
         location = /service_worker.js {
-            proxy_pass http://supervisor/core/service_worker.js;
-            proxy_set_header Authorization "Bearer {{ env "SUPERVISOR_TOKEN" }}";
+            proxy_pass http://homeassistant:8123/service_worker.js;
             proxy_set_header Host $host;
         }
 
