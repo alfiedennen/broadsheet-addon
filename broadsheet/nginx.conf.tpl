@@ -54,20 +54,25 @@ http {
         # forever. Missing files MUST return a real 404 (never the SPA
         # fallback) so SvelteKit can detect version skew when a tab
         # outlives a deploy and reload itself.
-        location /_app/immutable/ {
+        #
+        # 0.9.4.5: `^~` prefix modifier means this location wins over
+        # the asset-extension regex fallback added below for the embed
+        # proxy. Without it the regex `~* ^/[^/]+/.+\.(js|...)$` would
+        # try to proxy broadsheet's own /_app/ files to HA.
+        location ^~ /_app/immutable/ {
             try_files $uri =404;
             add_header Cache-Control "public, max-age=31536000, immutable";
         }
 
         # Non-hashed /_app/ (version.json, env.js) — must revalidate.
-        location /_app/ {
+        location ^~ /_app/ {
             try_files $uri =404;
             add_header Cache-Control "no-cache";
         }
 
         # Plugin static assets — staged into image at
         # www/plugin-assets/<id>/ by CI. Bundled with build.
-        location /plugin-assets/ {
+        location ^~ /plugin-assets/ {
             try_files $uri =404;
             add_header Cache-Control "public, max-age=300";
         }
@@ -75,7 +80,7 @@ http {
         # User-uploaded plugin data — lives on /data/ persistent volume.
         # CSP default-src 'none' is belt-and-braces against
         # script-bearing SVG uploads.
-        location /plugin-data/ {
+        location ^~ /plugin-data/ {
             alias /data/plugin-data/;
             try_files $uri =404;
             add_header Cache-Control "public, max-age=60, must-revalidate";
@@ -84,14 +89,15 @@ http {
         }
 
         # ── Curation API — proxy to the sidecar Python service ──
-        location /api/broadsheet/ {
+        # 0.9.4.5: `^~` so this wins over the embed-asset regex fallback.
+        location ^~ /api/broadsheet/ {
             proxy_pass http://127.0.0.1:8100/;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
         }
 
         # ── Harold preset API — same sidecar, /harold-preset/ prefix ──
-        location /api/harold-preset/ {
+        location ^~ /api/harold-preset/ {
             proxy_pass http://127.0.0.1:8100/harold-preset/;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
@@ -107,7 +113,7 @@ http {
         # WS protocol requires it explicitly), so runtime-env.js carries
         # supervisorToken (baked by run.sh, rotates per container). The
         # nginx Authorization header injection is for REST calls only.
-        location /api/websocket {
+        location ^~ /api/websocket {
             proxy_pass http://supervisor/core/api/websocket;
             proxy_set_header Authorization "Bearer {{ env "SUPERVISOR_TOKEN" }}";
             proxy_http_version 1.1;
@@ -117,7 +123,7 @@ http {
             proxy_read_timeout 86400;
             proxy_buffering off;
         }
-        location /api/ {
+        location ^~ /api/ {
             proxy_pass http://supervisor/core/api/;
             proxy_set_header Authorization "Bearer {{ env "SUPERVISOR_TOKEN" }}";
             proxy_http_version 1.1;
@@ -127,10 +133,15 @@ http {
         }
 
         # ── HA static /local/* — paintings + user uploads ──
-        location /local/ {
-            proxy_pass http://supervisor/core/local/;
-            proxy_set_header Authorization "Bearer {{ env "SUPERVISOR_TOKEN" }}";
+        # 0.9.4.5: switched upstream from supervisor/core/local (REST
+        # API only — returned 403 for actual file requests) to
+        # homeassistant:8123/local (HA Core's static-file serving for
+        # /config/www/). No Bearer auth — HA serves /local/ files
+        # publicly to authenticated browser sessions.
+        location ^~ /local/ {
+            proxy_pass http://homeassistant:8123/local/;
             proxy_set_header Host $host;
+            proxy_hide_header X-Frame-Options;
         }
 
         # ── 0.9.4.4: lovelace-embed proxy + auxiliary HA-asset routes ──
@@ -168,17 +179,17 @@ http {
             proxy_read_timeout 86400;
             proxy_buffering off;
         }
-        location /static/ {
+        location ^~ /static/ {
             proxy_pass http://homeassistant:8123/static/;
             proxy_set_header Host $host;
             proxy_hide_header X-Frame-Options;
         }
-        location /frontend_latest/ {
+        location ^~ /frontend_latest/ {
             proxy_pass http://homeassistant:8123/frontend_latest/;
             proxy_set_header Host $host;
             proxy_hide_header X-Frame-Options;
         }
-        location /auth/ {
+        location ^~ /auth/ {
             proxy_pass http://homeassistant:8123/auth/;
             proxy_set_header Host $host;
             proxy_hide_header X-Frame-Options;
@@ -190,6 +201,39 @@ http {
         location = /service_worker.js {
             proxy_pass http://homeassistant:8123/service_worker.js;
             proxy_set_header Host $host;
+        }
+
+        # ── 0.9.4.5: HACS asset proxy + asset-extension fallback ──
+        #
+        # HACS-installed Lovelace plugins serve their files from
+        # /hacsfiles/<repo>/file.js. The embedded Lovelace's HTML
+        # references those paths as absolute URLs; without a proxy
+        # they fall through to broadsheet's SPA fallback (returns
+        # index.html as text/html → "Failed to load module script:
+        # Expected JS but server responded with text/html").
+        location ^~ /hacsfiles/ {
+            proxy_pass http://homeassistant:8123/hacsfiles/;
+            proxy_set_header Host $host;
+            proxy_hide_header X-Frame-Options;
+        }
+
+        # Catch-all for unknown file-extension paths. HACS integrations
+        # like `custom:room-presence-card` register their own static
+        # paths (e.g. /room_presence/room-presence-card.js). Rather than
+        # enumerating every custom path, this regex catches any path
+        # that LOOKS like an asset request (has a file extension) and
+        # tries broadsheet's own files first, falling back to the HA
+        # proxy. SPA routes without extensions still hit the / fallback.
+        #
+        # The ^~ on broadsheet's known asset locations (_app, etc.)
+        # is what keeps this from cannibalising them.
+        location ~* ^/[^/]+/.+\.(js|mjs|css|png|jpg|jpeg|svg|ico|woff2?|ttf|json|wasm|webp|gif|map)$ {
+            try_files $uri @ha_asset_proxy;
+        }
+        location @ha_asset_proxy {
+            proxy_pass http://homeassistant:8123$request_uri;
+            proxy_set_header Host $host;
+            proxy_hide_header X-Frame-Options;
         }
 
         # ── SPA fallback ──
